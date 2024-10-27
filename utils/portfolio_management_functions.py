@@ -68,12 +68,13 @@ def read_excel_default(excel_name: str, sheet_name: str = None, index_col : int 
         data.index.name = 'date'
     return data
 
-def return_to_df(returns: Union[pd.DataFrame, pd.Series, List[pd.Series]]):
+
+def returns_to_df(returns: Union[pd.DataFrame, pd.Series, List[pd.Series]], name: str = "Returns"):
     """
     Converts returns to a DataFrame if it is a Series or a list of Series.
 
     Parameters:
-    returns (pd.DataFrame, pd.Series, or list): Time series of returns.
+    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
 
     Returns:
     pd.DataFrame: DataFrame of returns.
@@ -90,13 +91,13 @@ def return_to_df(returns: Union[pd.DataFrame, pd.Series, List[pd.Series]]):
             if isinstance(series, pd.Series):
                 returns = returns.merge(series, right_index=True, left_index=True, how='outer')
             else:
-                raise TypeError('Returns must be either a pd.DataFrame or a list of pd.Series')
+                raise TypeError(f'{name} must be either a pd.DataFrame or a list of pd.Series')
             
     # Convert returns to float
     try:
         returns = returns.apply(lambda x: x.astype(float))
     except ValueError:
-        print('Could not convert returns to float. Check if there are any non-numeric values')
+        print(f'Could not convert {name} to float. Check if there are any non-numeric values')
         pass
 
     return returns
@@ -133,430 +134,6 @@ def fix_dates_index(returns: pd.DataFrame):
         pass
 
     return returns
-
-def calc_cummulative_returns(
-    returns: Union[pd.DataFrame, pd.Series],
-    return_plot: bool = True,
-    fig_size: Union[int, float] = 7,
-    return_series: bool = False,
-    name: str = None,
-    timeframes: Union[None, dict] = None,
-):
-    """
-    Calculates cumulative returns from a time series of returns.
-
-    Parameters:
-    returns (pd.DataFrame or pd.Series): Time series of returns.
-    return_plot (bool, default=True): If True, plots the cumulative returns.
-    fig_size (int or float, default = 7): Size of the plot for cumulative returns. Scale: 1.5
-    return_series (bool, default=False): If True, returns the cumulative returns as a DataFrame.
-    name (str, default=None): Name for the title of the plot or the cumulative return series.
-    timeframes (dict or None, default=None): Dictionary of timeframes to calculate cumulative returns for each period.
-
-    Returns:
-    pd.DataFrame or None: Returns cumulative returns DataFrame if `return_series` is True.
-    """
-    if timeframes is not None:
-        for name, timeframe in timeframes.items():
-            if timeframe[0] and timeframe[1]:
-                timeframe_returns = returns.loc[timeframe[0]:timeframe[1]]
-            elif timeframe[0]:
-                timeframe_returns = returns.loc[timeframe[0]:]
-            elif timeframe[1]:
-                timeframe_returns = returns.loc[:timeframe[1]]
-            else:
-                timeframe_returns = returns.copy()
-            if len(timeframe_returns.index) == 0:
-                raise Exception(f'No returns data for {name} timeframe')
-            calc_cummulative_returns(
-                timeframe_returns,
-                return_plot=True,
-                fig_size=fig_size,
-                return_series=False,
-                name=name,
-                timeframes=None
-            )
-        return
-    returns = returns.copy()
-    if isinstance(returns, pd.Series):
-        returns = returns.to_frame()
-    returns = (1 + returns).cumprod()
-    returns = returns - 1
-    title = f'Cummulative Returns {name}' if name else 'Cummulative Returns'
-    if return_plot:
-        returns.plot(
-            title=title,
-            figsize=(fig_size*1.5, fig_size),
-            grid=True,
-            xlabel='Date',
-            ylabel='Cummulative Returns'
-        )
-    if return_series == True or return_plot == False:
-        return returns
-
-def calc_returns_statistics(
-    returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
-    annual_factor: int = None,
-    provided_excess_returns: bool = None,
-    rf: Union[pd.Series, pd.DataFrame] = None,
-    var_quantile: Union[float , List] = .05,
-    timeframes: Union[None, dict] = None,
-    return_tangency_weights: bool = True,
-    correlations: Union[bool, List] = True,
-    keep_columns: Union[list, str] = None,
-    drop_columns: Union[list, str] = None,
-    keep_indexes: Union[list, str] = None,
-    drop_indexes: Union[list, str] = None,
-    _timeframe_name: str = None,
-):
-    """
-    Calculates summary statistics for a time series of returns.   
-
-    Parameters:
-    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
-    annual_factor (int, default=None): Factor for annualizing returns.
-    provided_excess_returns (bool, default=None): Whether excess returns are already provided.
-    rf (pd.Series or pd.DataFrame, default=None): Risk-free rate data.
-    var_quantile (float or list, default=0.05): Quantile for Value at Risk (VaR) calculation.
-    timeframes (dict or None, default=None): Dictionary of timeframes [start, finish] to calculate statistics for each period.
-    return_tangency_weights (bool, default=True): If True, returns tangency portfolio weights.
-    correlations (bool or list, default=True): If True, returns correlations, or specify columns for correlations.
-    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
-    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
-    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
-    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
-
-    Returns:
-    pd.DataFrame: Summary statistics of the returns.
-    """
-
-    # Check if returns is a DataFrame, Series or a list of Series
-    if isinstance(returns, pd.DataFrame):
-        returns = returns.copy()
-    elif(isinstance(returns, pd.Series)):
-        returns = returns.to_frame()
-    elif isinstance(returns, list):
-        returns_list = returns.copy()
-        returns = pd.DataFrame({})
-        for series in returns_list:
-            if isinstance(series, pd.Series):
-                returns = returns.merge(series, right_index=True, left_index=True, how='outer')
-            else:
-                raise TypeError('Returns must be either a pd.DataFrame or a list of pd.Series')
-    else:
-        raise TypeError('Returns must be either a pd.DataFrame or a list of pd.Series')
-
-    
-    # Check if 'date' is in the columns and set it as the index
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
-
-    # Convert dates to datetime
-    try:
-        returns.index = pd.to_datetime(returns.index.map(lambda x: x.date()))
-    except ValueError:
-        print('Could not convert the index to datetime. Check the index format for invalid dates.')
-
-    # Convert returns to float
-    try:
-        returns = returns.apply(lambda x: x.astype(float))
-    except ValueError:
-        print('Could not convert returns to float. Check if there are any non-numeric values')
-        pass
-
-    # Assume annualization factor of 12 for monthly returns if None and notify user
-    if annual_factor is None:
-        print('Assuming monthly returns with annualization term of 12')
-        annual_factor = 12
-
-    if keep_columns is None:
-        keep_columns = ['Accumulated Return', 'Annualized Mean', 'Annualized Vol', 'Annualized Sharpe', 'Min', 'Mean', 'Max',
-                        'Skewness', 'Excess Kurtosis', 'Historical VaR (5.0%)', 'Historical CVaR (5.0%)', 'Max Drawdown', 
-                        'Peak Date', 'Bottom Date', 'Recovery', 'Duration (days)']
-
-    # Iterate to calculate statistics for multiple timeframes
-    if isinstance(timeframes, dict):
-        all_timeframes_summary_statistics = pd.DataFrame({})
-        for name, timeframe in timeframes.items():
-            if timeframe[0] and timeframe[1]:
-                timeframe_returns = returns.loc[timeframe[0]:timeframe[1]]
-            elif timeframe[0]:
-                timeframe_returns = returns.loc[timeframe[0]:]
-            elif timeframe[1]:
-                timeframe_returns = returns.loc[:timeframe[1]]
-            else:
-                timeframe_returns = returns.copy()
-            if len(timeframe_returns.index) == 0:
-                raise Exception(f'No returns data for {name} timeframe')
-            
-            timeframe_returns = timeframe_returns.rename(columns=lambda col: col + f' ({name})')
-            timeframe_summary_statistics = calc_returns_statistics(
-                returns=timeframe_returns,
-                annual_factor=annual_factor,
-                provided_excess_returns=provided_excess_returns,
-                rf=rf,
-                var_quantile=var_quantile,
-                timeframes=None,
-                correlations=correlations,
-                _timeframe_name=name,
-                keep_columns=keep_columns,
-                drop_columns=drop_columns,
-                keep_indexes=keep_indexes,
-                drop_indexes=drop_indexes
-            )
-            all_timeframes_summary_statistics = pd.concat(
-                [all_timeframes_summary_statistics, timeframe_summary_statistics],
-                axis=0
-            )
-        return all_timeframes_summary_statistics
-
-    # Calculate summary statistics for a single timeframe
-    summary_statistics = pd.DataFrame(index=returns.columns)
-    summary_statistics['Mean'] = returns.mean()
-    summary_statistics['Annualized Mean'] = returns.mean() * annual_factor
-    summary_statistics['Vol'] = returns.std()
-    summary_statistics['Annualized Vol'] = returns.std() * np.sqrt(annual_factor)
-
-    if provided_excess_returns is True:
-        if rf is not None:
-            print('Excess returns and risk-free were both provided.'
-                ' Excess returns will be consider as is, and risk-free rate given will be ignored.\n'
-            )
-        summary_statistics['Sharpe'] = returns.mean() / returns.std()
-    else:
-        try:
-            if rf is None:
-                print('No risk-free rate provided. Interpret "Sharpe" as "Mean/Volatility".\n')
-                summary_statistics['Sharpe'] = returns.mean() / returns.std()
-            elif isinstance(rf, (pd.Series, pd.DataFrame)):
-                rf = rf.copy()
-                if len(rf.index) != len(returns.index):
-                    raise Exception('"rf" index must be the same lenght as "returns"')
-                if type(rf) == pd.DataFrame:
-                    rf = rf.iloc[:, 0].to_list()
-                elif type(rf) == pd.Series:
-                    rf = rf.to_list()
-                
-                excess_returns = returns.apply(lambda x: x - rf)
-                summary_statistics['Sharpe'] = excess_returns.mean() / returns.std()
-            else:
-                raise TypeError('Returns must be either a pd.DataFrame or a list of pd.Series')
-        except Exception as e:
-            print(f'Could not calculate Sharpe: {e}')
-
-    summary_statistics['Annualized Sharpe'] = summary_statistics['Sharpe'] * np.sqrt(annual_factor)
-    summary_statistics['Min'] = returns.min()
-    summary_statistics['Max'] = returns.max()
-    
-    tail_risk_stats = stats_tail_risk(returns,
-                                      annual_factor=annual_factor,
-                                      var_quantile=var_quantile,
-                                      keep_indexes=keep_indexes,
-                                      drop_indexes=drop_indexes)
-
-    summary_statistics = summary_statistics.join(tail_risk_stats)
-    
-    print('Summary Statistics:')
-    print(summary_statistics)
-
-    if return_tangency_weights is True:
-        tangency_weights = calc_tangency_port(returns)
-        summary_statistics = summary_statistics.join(tangency_weights)
-
-    if correlations is True or isinstance(correlations, list):
-        returns_corr = returns.corr()
-        if _timeframe_name:
-            returns_corr = returns_corr.rename(columns=lambda col: col.replace(f' {_timeframe_name}', ''))
-        returns_corr = returns_corr.rename(columns=lambda col: col + ' Correlation')
-        if isinstance(correlations, list):
-            correlation_names = [col + ' Correlation' for col  in correlations]
-            # Check if all selected columns exist in returns_corr
-            not_in_returns_corr = [col for col in correlation_names if col not in returns_corr.columns]
-            if len(not_in_returns_corr) > 0:
-                not_in_returns_corr = ", ".join([c.replace(' Correlation', '') for c in not_in_returns_corr])
-                raise Exception(f'{not_in_returns_corr} not in returns columns')
-            returns_corr = returns_corr[[col + ' Correlation' for col  in correlations]]
-        summary_statistics = summary_statistics.join(returns_corr)
-    
-    return filter_columns_and_indexes(
-        summary_statistics,
-        keep_columns=keep_columns,
-        drop_columns=drop_columns,
-        keep_indexes=keep_indexes,
-        drop_indexes=drop_indexes
-    )
-
-
-def stats_tail_risk(
-    returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
-    annual_factor: int = None,
-    var_quantile: Union[float , List] = .05,
-    keep_columns: Union[list, str] = None,
-    drop_columns: Union[list, str] = None,
-    keep_indexes: Union[list, str] = None,
-    drop_indexes: Union[list, str] = None,
-):
-    """
-    Calculates tail risk summary statistics for a time series of returns.   
-
-    Parameters:
-    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
-    annual_factor (int, default=None): Factor for annualizing returns.
-    var_quantile (float or list, default=0.05): Quantile for Value at Risk (VaR) calculation.
-    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
-    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
-    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
-    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
-
-    Returns:
-    pd.DataFrame: tail risk summary statistics of the returns.
-    """
-
-    # Check if returns is a DataFrame, Series or a list of Series
-    if isinstance(returns, pd.DataFrame):
-        returns = returns.copy()
-    elif(isinstance(returns, pd.Series)):
-        returns = returns.to_frame()
-    elif isinstance(returns, list):
-        returns_list = returns.copy()
-        returns = pd.DataFrame({})
-        for series in returns_list:
-            if isinstance(series, pd.Series):
-                returns = returns.merge(series, right_index=True, left_index=True, how='outer')
-            else:
-                raise TypeError('Returns must be either a pd.DataFrame or a list of pd.Series')
-    else:
-        raise TypeError('Returns must be either a pd.DataFrame or a list of pd.Series')
-
-    
-    # Check if 'date' is in the columns and set it as the index
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
-
-    # Convert dates to datetime
-    try:
-        returns.index = pd.to_datetime(returns.index.map(lambda x: x.date()))
-    except ValueError:
-        print('Could not convert the index to datetime. Check the index format for invalid dates.')
-
-    # Convert returns to float
-    try:
-        returns = returns.apply(lambda x: x.astype(float))
-    except ValueError:
-        print('Could not convert returns to float. Check if there are any non-numeric values')
-        pass
-
-    tail_risk_stats = pd.DataFrame(index=returns.columns)
-
-    tail_risk_stats['Skewness'] = returns.skew()
-    tail_risk_stats['Excess Kurtosis'] = returns.kurtosis()
-    var_quantile = [var_quantile] if isinstance(var_quantile, (float, int)) else var_quantile
-    for var_q in var_quantile:
-        tail_risk_stats[f'Historical VaR ({var_q:.1%})'] = returns.quantile(var_q, axis = 0)
-        tail_risk_stats[f'Historical CVaR ({var_q:.1%})'] = returns[returns <= returns.quantile(var_q, axis = 0)].mean()
-        if annual_factor:
-            tail_risk_stats[f'Annualized Historical VaR ({var_q:.1%})'] = returns.quantile(var_q, axis = 0) * np.sqrt(annual_factor)
-            tail_risk_stats[f'Annualized Historical CVaR ({var_q:.1%})'] = returns[returns <= returns.quantile(var_q, axis = 0)].mean() * np.sqrt(annual_factor)
-    
-    cum_returns = (1 + returns).cumprod()
-    maximum = cum_returns.cummax()
-    drawdown = cum_returns / maximum - 1
-
-    tail_risk_stats['Accumulated Return'] = cum_returns.iloc[-1] - 1
-    tail_risk_stats['Max Drawdown'] = drawdown.min()
-    tail_risk_stats['Peak Date'] = [maximum[col][:drawdown[col].idxmin()].idxmax() for col in maximum.columns]
-    tail_risk_stats['Bottom Date'] = drawdown.idxmin()
-    
-
-    recovery_date = []
-    for col in cum_returns.columns:
-        prev_max = maximum[col][:drawdown[col].idxmin()].max()
-        recovery_wealth = pd.DataFrame([cum_returns[col][drawdown[col].idxmin():]]).T
-        recovery_date.append(recovery_wealth[recovery_wealth[col] >= prev_max].index.min())
-    tail_risk_stats['Recovery'] = recovery_date
-
-    tail_risk_stats["Duration (days)"] = [
-        (i - j).days if i != pd.NaT else "-" for i, j in
-        zip(tail_risk_stats["Recovery"], tail_risk_stats["Bottom Date"])
-    ]
-
-    return filter_columns_and_indexes(
-        tail_risk_stats,
-        keep_columns=keep_columns,
-        drop_columns=drop_columns,
-        keep_indexes=keep_indexes,
-        drop_indexes=drop_indexes
-    )
-
-
-def calc_neg_pos_pct(
-    returns: Union[pd.DataFrame, pd.Series, list],
-    calc_positive: bool = False,
-    keep_columns: Union[list, str] = None,
-    drop_columns: Union[list, str] = None,
-    keep_indexes: Union[list, str] = None,
-    drop_indexes: Union[list, str] = None
-):
-    """
-    Calculates the percentage of negative and positive returns in the provided data.
-
-    Parameters:
-    returns (pd.DataFrame, pd.Series, or list): Time series of returns.
-    calc_positive (bool, default=False): If True, calculates the percentage of positive returns.
-    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
-    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
-    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
-    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
-
-    Returns:
-    pd.DataFrame: A DataFrame with the percentage of negative or positive returns, number of returns, and the count of negative/positive returns.
-    """
-    returns = returns.copy()
-    if isinstance(returns, list):
-        returns_list = returns[:]
-        returns = pd.DataFrame({})
-        for series in returns_list:
-            returns = returns.merge(series, right_index=True, left_index=True, how='outer')
-
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-        
-    returns.index.name = 'date'
-
-    if isinstance(returns, pd.Series):
-        returns = returns.to_frame()
-    returns = returns.apply(lambda x: x.astype(float))
-    prev_len_index = returns.apply(lambda x: len(x))
-    returns  =returns.dropna(axis=0)
-    new_len_index = returns.apply(lambda x: len(x))
-    if not (prev_len_index == new_len_index).all():
-        print('Some columns had NaN values and were dropped')
-    if calc_positive:
-        returns = returns.applymap(lambda x: 1 if x > 0 else 0)
-    else:
-        returns = returns.applymap(lambda x: 1 if x < 0 else 0)
-
-    negative_statistics = (
-        returns
-        .agg(['mean', 'count', 'sum'])
-        .set_axis(['% Negative Returns', 'Nº Returns', 'Nº Negative Returns'], axis=0)
-    )
-
-    if calc_positive:
-        negative_statistics = negative_statistics.rename(lambda i: i.replace('Negative', 'Positive'), axis=0)
-
-    return filter_columns_and_indexes(
-        negative_statistics,
-        keep_columns=keep_columns,
-        drop_columns=drop_columns,
-        keep_indexes=keep_indexes,
-        drop_indexes=drop_indexes
-    )
 
 
 def filter_columns_and_indexes(
@@ -610,190 +187,408 @@ def filter_columns_and_indexes(
     return df
 
 
-def calc_cross_section_regression(
-    returns: Union[pd.DataFrame, List],
-    factors: Union[pd.DataFrame, List],
+def calc_cummulative_returns(
+    returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    return_plot: bool = True,
+    fig_size: Union[int, float] = 7,
+    return_series: bool = False,
+    name: str = None,
+    timeframes: Union[None, dict] = None,
+):
+    """
+    Calculates cumulative returns from a time series of returns.
+
+    Parameters:
+    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
+    return_plot (bool, default=True): If True, plots the cumulative returns.
+    fig_size (int or float, default = 7): Size of the plot for cumulative returns. Scale: 1.5
+    return_series (bool, default=False): If True, returns the cumulative returns as a DataFrame.
+    name (str, default=None): Name for the title of the plot or the cumulative return series.
+    timeframes (dict or None, default=None): Dictionary of timeframes to calculate cumulative returns for each period.
+
+    Returns:
+    pd.DataFrame or None: Returns cumulative returns DataFrame if `return_series` is True.
+    """
+
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+
+    if timeframes is not None:
+        for name, timeframe in timeframes.items():
+            if timeframe[0] and timeframe[1]:
+                timeframe_returns = returns.loc[timeframe[0]:timeframe[1]]
+            elif timeframe[0]:
+                timeframe_returns = returns.loc[timeframe[0]:]
+            elif timeframe[1]:
+                timeframe_returns = returns.loc[:timeframe[1]]
+            else:
+                timeframe_returns = returns.copy()
+            if len(timeframe_returns.index) == 0:
+                raise Exception(f'No returns data for {name} timeframe')
+            calc_cummulative_returns(
+                timeframe_returns,
+                return_plot=True,
+                fig_size=fig_size,
+                return_series=False,
+                name=name,
+                timeframes=None
+            )
+        return
+   
+    returns = (1 + returns).cumprod()
+    returns = returns - 1
+    title = f'Cummulative Returns {name}' if name else 'Cummulative Returns'
+    if return_plot:
+        returns.plot(
+            title=title,
+            figsize=(fig_size*1.5, fig_size),
+            grid=True,
+            xlabel='Date',
+            ylabel='Cummulative Returns'
+        )
+    if return_series == True or return_plot == False:
+        return returns
+
+
+def calc_portfolio_returns(
+    returns: Union[pd.DataFrame, List[pd.Series]],
+    weights: Union[dict, list, pd.Series, pd.DataFrame],
+    port_name: Union[None, str] = None
+):
+    """
+    Creates a portfolio by applying the specified weights to the asset returns.
+
+    Parameters:
+    returns (pd.DataFrame or List of pd.Series): Time series of asset returns.
+    weights (list or pd.Series): Weights to apply to the returns. If a list or pd.Series is provided, it will be converted into a dict.
+    port_name (str or None, default=None): Name for the portfolio. If None, a name will be generated based on asset weights.
+
+    Returns:
+    pd.DataFrame: The portfolio returns based on the provided weights.
+    """
+
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+    
+    if isinstance(weights, list):
+        print("Weights are a list. Converting to dict assuming same order as columns in returns")
+        weights = dict(zip(returns.columns, weights))
+    elif isinstance(weights, pd.Series):
+        weights = weights.to_dict()
+    elif isinstance(weights, pd.DataFrame):
+        weights = list(weights.to_dict().values())[0]
+    elif isinstance(weights, dict):
+        pass
+    else:
+        raise Exception("Weights must be a dict, list, pd.Series, or pd.DataFrame")
+    
+    # Check returns size and weight size:
+    if returns.shape[1] != len(weights):
+        raise Exception(f"Returns have {returns.shape[1]} assets, but {len(weights)} weights were provided")
+
+    returns = returns[list(weights.keys())]
+    port_returns = pd.DataFrame(returns @ list(weights.values()))
+
+    if port_name is None:
+        print("Portfolio: "+" + ".join([f"{n} ({w:.2%})" for n, w in weights.items()]))
+        port_name = 'Portfolio'
+    port_returns.columns = [port_name]
+
+    return port_returns
+
+
+def calc_returns_statistics(
+    returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
     annual_factor: int = None,
     provided_excess_returns: bool = None,
-    rf: pd.Series = None,
-    return_model: bool = False,
-    name: str = None,
-    return_mae: bool = True,
-    intercept_cross_section: bool = True,
-    return_historical_premium: bool = True,
-    return_annualized_premium: bool = True,
-    compare_premiums: bool = False,
+    rf: Union[pd.Series, pd.DataFrame] = None,
+    var_quantile: Union[float , List] = .05,
+    timeframes: Union[None, dict] = None,
+    return_tangency_weights: bool = True,
+    correlations: Union[bool, List] = True,
+    tail_risks: bool = True,
     keep_columns: Union[list, str] = None,
     drop_columns: Union[list, str] = None,
     keep_indexes: Union[list, str] = None,
-    drop_indexes: Union[list, str] = None
+    drop_indexes: Union[list, str] = None,
+    _timeframe_name: str = None,
 ):
     """
-    Performs a cross-sectional regression on the provided returns and factors.
+    Calculates summary statistics for a time series of returns.   
 
     Parameters:
-    returns (pd.DataFrame or list): Time series of returns.
-    factors (pd.DataFrame or list): Time series of factor data.
+    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
     annual_factor (int, default=None): Factor for annualizing returns.
     provided_excess_returns (bool, default=None): Whether excess returns are already provided.
-    rf (pd.Series, default=None): Risk-free rate data for subtracting from returns.
-    return_model (bool, default=False): If True, returns the regression model.
-    name (str, default=None): Name for labeling the regression.
-    return_mae (bool, default=True): If True, returns the mean absolute error of the regression.
-    intercept_cross_section (bool, default=True): If True, includes an intercept in the cross-sectional regression.
-    return_historical_premium (bool, default=True): If True, returns the historical premium of factors.
-    return_annualized_premium (bool, default=True): If True, returns the annualized premium of factors.
-    compare_premiums (bool, default=False): If True, compares the historical and estimated premiums.
+    rf (pd.Series or pd.DataFrame, default=None): Risk-free rate data.
+    var_quantile (float or list, default=0.05): Quantile for Value at Risk (VaR) calculation.
+    timeframes (dict or None, default=None): Dictionary of timeframes [start, finish] to calculate statistics for each period.
+    return_tangency_weights (bool, default=True): If True, returns tangency portfolio weights.
+    correlations (bool or list, default=True): If True, returns correlations, or specify columns for correlations.
+    tail_risks (bool, default=True): If True, include tail risk statistics.
     keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
     drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
     keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
     drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
 
     Returns:
-    pd.DataFrame or model: Cross-sectional regression output or the model if `return_model` is True.
+    pd.DataFrame: Summary statistics of the returns.
     """
-    returns = returns.copy()
-    factors = factors.copy()
-    if isinstance(rf, (pd.Series, pd.DataFrame)):
-        rf = rf.copy()
 
-    if compare_premiums:
-        return_historical_premium = True
-        return_annualized_premium = True
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
-    if isinstance(returns, list):
-        returns_list = returns[:]
-        returns = pd.DataFrame({})
-        for series in returns_list:
-            returns = returns.merge(series, right_index=True, left_index=True, how='outer')
+    if rf is not None:
+        rf = returns_to_df(rf) # Convert returns to DataFrame if it is a Series
+        fix_dates_index(rf) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+        if len(rf.index) != len(returns.index):
+            raise Exception('"rf" index must be the same lenght as "returns"')
+        if type(rf) == pd.DataFrame:
+            rf = rf.iloc[:, 0].to_list()
+        elif type(rf) == pd.Series:
+            rf = rf.to_list()
 
+    # Assume annualization factor of 12 for monthly returns if None and notify user
     if annual_factor is None:
         print('Assuming monthly returns with annualization term of 12')
         annual_factor = 12
 
-    if isinstance(factors, list):
-        factors_list = returns[:]
-        factors = pd.DataFrame({})
-        for series in factors_list:
-            factors = factors.merge(series, right_index=True, left_index=True, how='outer')
+    if keep_columns is None:
+        keep_columns = ['Accumulated Return', 'Annualized Mean', 'Annualized Vol', 'Annualized Sharpe', 'Min', 'Mean', 'Max']
+        if tail_risks == True:
+            keep_columns += ['Skewness', 'Excess Kurtosis', 'Historical VaR (5.0%)', 'Historical CVaR (5.0%)', 'Max Drawdown', 
+                        'Peak Date', 'Bottom Date', 'Recovery', 'Duration (days)']
 
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
-
-    if provided_excess_returns is None:
-        print('Assuming excess returns were provided')
-        provided_excess_returns = True
-    elif provided_excess_returns is False:
-        if rf is not None:
-            if len(rf.index) != len(returns.index):
-                raise Exception('"rf" index must be the same lenght as "returns"')
-            print('"rf" is used to subtract returns')
-            returns = returns.sub(rf, axis=0)
-    
-    time_series_regressions = calc_iterative_regression(returns, factors, annual_factor=annual_factor, warnings=False)
-    time_series_betas = time_series_regressions.filter(regex='Beta$', axis=1)
-    time_series_historical_returns = time_series_regressions[['Fitted Mean']]
-    cross_section_regression = calc_regression(
-        time_series_historical_returns, time_series_betas,
-        annual_factor=annual_factor, intercept=intercept_cross_section,
-        return_model=return_model, warnings=False
-    )
-
-    if return_model:
-        return cross_section_regression
-    cross_section_regression = cross_section_regression.rename(columns=lambda c: c.replace(' Beta Beta', ' Lambda').replace('Alpha', 'Eta'))
-    if name is None:
-        name = " + ".join([c.replace(' Lambda', '') for c in cross_section_regression.filter(regex=' Lambda$', axis=1).columns])
-    cross_section_regression.index = [f'{name} Cross-Section Regression']
-    cross_section_regression.drop([
-        'Information Ratio', 'Annualized Information Ratio', 'Tracking Error', 'Annualized Tracking Error', 'Fitted Mean', 'Annualized Fitted Mean'
-    ], axis=1, inplace=True)
-    if return_annualized_premium:
-        factors_annualized_premium = (
-            cross_section_regression
-            .filter(regex=' Lambda$', axis=1)
-            .apply(lambda x: x * annual_factor)
-            .rename(columns=lambda c: c.replace(' Lambda', ' Annualized Lambda'))
-        )
-        cross_section_regression = cross_section_regression.join(factors_annualized_premium)
-
-    if return_historical_premium:
-        print('Lambda represents the premium calculated by the cross-section regression and the historical premium is the average of the factor excess returns')
-        factors_historical_premium = factors.mean().to_frame(f'{name} Cross-Section Regression').transpose().rename(columns=lambda c: c + ' Historical Premium')
-        cross_section_regression = cross_section_regression.join(factors_historical_premium)
-        if return_annualized_premium:
-            factors_annualized_historical_premium = (
-                factors_historical_premium
-                .apply(lambda x: x * annual_factor)
-                .rename(columns=lambda c: c.replace(' Historical Premium', ' Annualized Historical Premium'))
+    # Iterate to calculate statistics for multiple timeframes
+    if isinstance(timeframes, dict):
+        all_timeframes_summary_statistics = pd.DataFrame({})
+        for name, timeframe in timeframes.items():
+            if timeframe[0] and timeframe[1]:
+                timeframe_returns = returns.loc[timeframe[0]:timeframe[1]]
+            elif timeframe[0]:
+                timeframe_returns = returns.loc[timeframe[0]:]
+            elif timeframe[1]:
+                timeframe_returns = returns.loc[:timeframe[1]]
+            else:
+                timeframe_returns = returns.copy()
+            if len(timeframe_returns.index) == 0:
+                raise Exception(f'No returns data for {name} timeframe')
+            
+            timeframe_returns = timeframe_returns.rename(columns=lambda col: col + f' ({name})')
+            timeframe_summary_statistics = calc_returns_statistics(
+                returns=timeframe_returns,
+                annual_factor=annual_factor,
+                provided_excess_returns=provided_excess_returns,
+                rf=rf,
+                var_quantile=var_quantile,
+                timeframes=None,
+                correlations=correlations,
+                _timeframe_name=name,
+                keep_columns=keep_columns,
+                drop_columns=drop_columns,
+                keep_indexes=keep_indexes,
+                drop_indexes=drop_indexes
             )
-            cross_section_regression = cross_section_regression.join(factors_annualized_historical_premium)
+            all_timeframes_summary_statistics = pd.concat(
+                [all_timeframes_summary_statistics, timeframe_summary_statistics],
+                axis=0
+            )
+        return all_timeframes_summary_statistics
 
-    if compare_premiums:
-        cross_section_regression = cross_section_regression.filter(regex='Lambda$|Historical Premium$', axis=1)
-        cross_section_regression = cross_section_regression.transpose()
-        cross_section_regression['Factor'] = cross_section_regression.index.str.extract(f'({"|".join(list(factors.columns))})').values
-        cross_section_regression['Premium Type'] = cross_section_regression.index.str.replace(f'({"|".join(list(factors.columns))})', '')
-        premiums_comparison = cross_section_regression.pivot(index='Factor', columns='Premium Type', values=f'{name} Cross-Section Regression')
-        premiums_comparison.columns.name = None
-        premiums_comparison.index.name = None
-        premiums_comparison.join(calc_tangency_port(factors))
-        premiums_comparison = premiums_comparison.join(factors.corr().rename(columns=lambda c: c + ' Correlation'))
-        return filter_columns_and_indexes(
-            premiums_comparison,
-            keep_columns=keep_columns,
-            drop_columns=drop_columns,
-            keep_indexes=keep_indexes,
-            drop_indexes=drop_indexes
-        )
+    # Calculate summary statistics for a single timeframe
+    summary_statistics = pd.DataFrame(index=returns.columns)
+    summary_statistics['Mean'] = returns.mean()
+    summary_statistics['Annualized Mean'] = returns.mean() * annual_factor
+    summary_statistics['Vol'] = returns.std()
+    summary_statistics['Annualized Vol'] = returns.std() * np.sqrt(annual_factor)
+
+    if provided_excess_returns is True:
+        if rf is not None:
+            print('Excess returns and risk-free were both provided.'
+                ' Excess returns will be consider as is, and risk-free rate given will be ignored.\n')
+        summary_statistics['Sharpe'] = returns.mean() / returns.std()
+    else:
+        try:
+            if rf is None:
+                print('No risk-free rate provided. Interpret "Sharpe" as "Mean/Volatility".\n')
+                summary_statistics['Sharpe'] = returns.mean() / returns.std()
+            else:
+                excess_returns = returns.apply(lambda x: x - rf)
+
+                summary_statistics['Sharpe'] = excess_returns.mean() / returns.std()
+        except Exception as e:
+            print(f'Could not calculate Sharpe: {e}')
+
+    summary_statistics['Annualized Sharpe'] = summary_statistics['Sharpe'] * np.sqrt(annual_factor)
+    summary_statistics['Min'] = returns.min()
+    summary_statistics['Max'] = returns.max()
     
-    if return_mae:
-        cross_section_regression['TS MAE'] = time_series_regressions['Alpha'].abs().mean()
-        cross_section_regression['TS Annualized MAE'] = time_series_regressions['Annualized Alpha'].abs().mean()
-        cross_section_regression_model = calc_regression(
-            time_series_historical_returns, time_series_betas,
-            annual_factor=annual_factor, intercept=intercept_cross_section,
-            return_model=True, warnings=False
-        )
-        cross_section_regression['CS MAE'] = cross_section_regression_model.resid.abs().mean()
-        cross_section_regression['CS Annualized MAE'] = cross_section_regression['CS MAE'] * annual_factor
+    if tail_risks == True:
+        tail_risk_stats = stats_tail_risk(returns,
+                                        annual_factor=annual_factor,
+                                        var_quantile=var_quantile,
+                                        keep_indexes=keep_indexes,
+                                        drop_indexes=drop_indexes)
 
+        summary_statistics = summary_statistics.join(tail_risk_stats)
+    
+    if return_tangency_weights is True:
+        tangency_weights = calc_tangency_port(returns)
+        summary_statistics = summary_statistics.join(tangency_weights)
+
+    if correlations is True or isinstance(correlations, list):
+        returns_corr = returns.corr()
+        if _timeframe_name:
+            returns_corr = returns_corr.rename(columns=lambda col: col.replace(f' {_timeframe_name}', ''))
+        returns_corr = returns_corr.rename(columns=lambda col: col + ' Correlation')
+        if isinstance(correlations, list):
+            correlation_names = [col + ' Correlation' for col  in correlations]
+            # Check if all selected columns exist in returns_corr
+            not_in_returns_corr = [col for col in correlation_names if col not in returns_corr.columns]
+            if len(not_in_returns_corr) > 0:
+                not_in_returns_corr = ", ".join([c.replace(' Correlation', '') for c in not_in_returns_corr])
+                raise Exception(f'{not_in_returns_corr} not in returns columns')
+            returns_corr = returns_corr[[col + ' Correlation' for col  in correlations]]
+        summary_statistics = summary_statistics.join(returns_corr)
+    
     return filter_columns_and_indexes(
-        cross_section_regression,
+        summary_statistics,
         keep_columns=keep_columns,
         drop_columns=drop_columns,
         keep_indexes=keep_indexes,
         drop_indexes=drop_indexes
     )
 
-def get_best_worse_sharpe(
-        summary_statistics: pd.DataFrame,
-        stat: str = 'Annualized Sharpe'):
+
+def stats_tail_risk(
+    returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    annual_factor: int = None,
+    var_quantile: Union[float , List] = .05,
+    keep_columns: Union[list, str] = None,
+    drop_columns: Union[list, str] = None,
+    keep_indexes: Union[list, str] = None,
+    drop_indexes: Union[list, str] = None,
+):
     """
-    Get the best and worst Sharpe ratio from a DataFrame of Sharpe ratios.
+    Calculates tail risk summary statistics for a time series of returns.   
 
     Parameters:
-    summary_statistics (pd.DataFrame): DataFrame containing summary statistics.
-    stat (str, default='Annualized Sharpe'): The statistic to compare assets by.
+    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
+    annual_factor (int, default=None): Factor for annualizing returns.
+    var_quantile (float or list, default=0.05): Quantile for Value at Risk (VaR) calculation.
+    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
+    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
+    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
+    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
 
     Returns:
-    pd.DtaFrame: Best and worst Sharpe ratios.
+    pd.DataFrame: tail risk summary statistics of the returns.
     """
 
-    best_worse_sharpe = summary_statistics.copy().sort_values("Annualized Sharpe", ascending=False)
-    best_worse_sharpe = best_worse_sharpe.iloc[[0, -1]]
-    best_worse_sharpe = best_worse_sharpe.assign(Label=["Best Sharpe", "Worst Sharpe"])
-    best_worse_sharpe = best_worse_sharpe[['Annualized Sharpe', 'Label']]
-    best_worse_sharpe
-    return best_worse_sharpe
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+
+    tail_risk_stats = pd.DataFrame(index=returns.columns)
+
+    tail_risk_stats['Skewness'] = returns.skew()
+    tail_risk_stats['Excess Kurtosis'] = returns.kurtosis()
+    var_quantile = [var_quantile] if isinstance(var_quantile, (float, int)) else var_quantile
+    for var_q in var_quantile:
+        tail_risk_stats[f'Historical VaR ({var_q:.1%})'] = returns.quantile(var_q, axis = 0)
+        tail_risk_stats[f'Historical CVaR ({var_q:.1%})'] = returns[returns <= returns.quantile(var_q, axis = 0)].mean()
+        if annual_factor:
+            tail_risk_stats[f'Annualized Historical VaR ({var_q:.1%})'] = returns.quantile(var_q, axis = 0) * np.sqrt(annual_factor)
+            tail_risk_stats[f'Annualized Historical CVaR ({var_q:.1%})'] = returns[returns <= returns.quantile(var_q, axis = 0)].mean() * np.sqrt(annual_factor)
+    
+    cum_returns = (1 + returns).cumprod()
+    maximum = cum_returns.cummax()
+    drawdown = cum_returns / maximum - 1
+
+    tail_risk_stats['Accumulated Return'] = cum_returns.iloc[-1] - 1
+    tail_risk_stats['Max Drawdown'] = drawdown.min()
+    tail_risk_stats['Peak Date'] = [maximum[col][:drawdown[col].idxmin()].idxmax() for col in maximum.columns]
+    tail_risk_stats['Bottom Date'] = drawdown.idxmin()
+    
+    recovery_date = []
+    for col in cum_returns.columns:
+        prev_max = maximum[col][:drawdown[col].idxmin()].max()
+        recovery_wealth = pd.DataFrame([cum_returns[col][drawdown[col].idxmin():]]).T
+        recovery_date.append(recovery_wealth[recovery_wealth[col] >= prev_max].index.min())
+    tail_risk_stats['Recovery'] = recovery_date
+
+    tail_risk_stats["Duration (days)"] = [
+        (i - j).days if i != pd.NaT else "-" for i, j in
+        zip(tail_risk_stats["Recovery"], tail_risk_stats["Bottom Date"])
+    ]
+
+    return filter_columns_and_indexes(
+        tail_risk_stats,
+        keep_columns=keep_columns,
+        drop_columns=drop_columns,
+        keep_indexes=keep_indexes,
+        drop_indexes=drop_indexes
+    )
+
+
+def calc_neg_pos_pct(
+    returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    calc_positive: bool = False,
+    keep_columns: Union[list, str] = None,
+    drop_columns: Union[list, str] = None,
+    keep_indexes: Union[list, str] = None,
+    drop_indexes: Union[list, str] = None
+):
+    """
+    Calculates the percentage of negative and positive returns in the provided data.
+
+    Parameters:
+    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
+    calc_positive (bool, default=False): If True, calculates the percentage of positive returns.
+    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
+    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
+    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
+    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
+
+    Returns:
+    pd.DataFrame: A DataFrame with the percentage of negative or positive returns, number of returns, and the count of negative/positive returns.
+    """
+    
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+
+    prev_len_index = returns.apply(lambda x: len(x))
+    returns  =returns.dropna(axis=0)
+    new_len_index = returns.apply(lambda x: len(x))
+    if not (prev_len_index == new_len_index).all():
+        print('Some columns had NaN values and were dropped')
+    if calc_positive:
+        returns = returns.applymap(lambda x: 1 if x > 0 else 0)
+    else:
+        returns = returns.applymap(lambda x: 1 if x < 0 else 0)
+
+    negative_statistics = (
+        returns
+        .agg(['mean', 'count', 'sum'])
+        .set_axis(['% Negative Returns', 'Nº Returns', 'Nº Negative Returns'], axis=0)
+    )
+
+    if calc_positive:
+        negative_statistics = negative_statistics.rename(lambda i: i.replace('Negative', 'Positive'), axis=0)
+
+    return filter_columns_and_indexes(
+        negative_statistics,
+        keep_columns=keep_columns,
+        drop_columns=drop_columns,
+        keep_indexes=keep_indexes,
+        drop_indexes=drop_indexes
+    )
+
 
 # CHECK THIS FUNCTION
-def get_best_and_worst_old(
+def get_best_and_worst(
     summary_statistics: pd.DataFrame,
     stat: str = 'Annualized Sharpe',
-    return_df: bool = True
+    return_all_stats: bool = True
 ):
     """
     Identifies the best and worst assets based on a specified statistic.
@@ -813,14 +608,14 @@ def get_best_and_worst_old(
 
     if stat not in summary_statistics.columns:
         raise Exception(f'{stat} not in "summary_statistics"')
-    summary_statistics.rename(columns=lambda c: c.replace(' ', '').lower())
+    
     best_stat = summary_statistics[stat].max()
     worst_stat = summary_statistics[stat].min()
     asset_best_stat = summary_statistics.loc[lambda df: df[stat] == df[stat].max()].index[0]
     asset_worst_stat = summary_statistics.loc[lambda df: df[stat] == df[stat].min()].index[0]
     print(f'The asset with the highest {stat} is {asset_best_stat}: {best_stat:.5f}')
     print(f'The asset with the lowest {stat} is {asset_worst_stat}: {worst_stat:.5f}')
-    if return_df:
+    if return_all_stats:
         return pd.concat([
             summary_statistics.loc[lambda df: df.index == asset_best_stat],
             summary_statistics.loc[lambda df: df.index == asset_worst_stat]
@@ -828,10 +623,11 @@ def get_best_and_worst_old(
     
 
 def calc_correlations(
-    returns: pd.DataFrame,
+    returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
     print_highest_lowest: bool = True,
     matrix_size: Union[int, float] = 7,
-    return_heatmap: bool = True,
+    show_heatmap: bool = False,
+    return_matrix: bool = True,
     keep_columns: Union[list, str] = None,
     drop_columns: Union[list, str] = None,
     keep_indexes: Union[list, str] = None,
@@ -841,10 +637,10 @@ def calc_correlations(
     Calculates the correlation matrix of the provided returns and optionally prints or visualizes it.
 
     Parameters:
-    returns (pd.DataFrame): Time series of returns.
+    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
     print_highest_lowest (bool, default=True): If True, prints the highest and lowest correlations.
     matrix_size (int or float, default=7): Size of the heatmap for correlation matrix visualization.
-    return_heatmap (bool, default=True): If True, returns a heatmap of the correlation matrix.
+    show_heatmap (bool, default=False): If True, returns a heatmap of the correlation matrix.
     keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
     drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
     keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
@@ -854,7 +650,8 @@ def calc_correlations(
     sns.heatmap or pd.DataFrame: Heatmap of the correlation matrix or the correlation matrix itself.
     """
 
-    returns = returns.copy()
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     returns = filter_columns_and_indexes(
         returns,
@@ -863,11 +660,6 @@ def calc_correlations(
         keep_indexes=keep_indexes,
         drop_indexes=drop_indexes
     )
-
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
 
     correlation_matrix = returns.corr()
 
@@ -884,9 +676,8 @@ def calc_correlations(
         lowest_corr = highest_lowest_corr.iloc[0, :]
         print(f'The highest correlation ({highest_corr["corr"]:.4f}) is between {highest_corr.asset_1} and {highest_corr.asset_2}')
         print(f'The lowest correlation ({lowest_corr["corr"]:.4f}) is between {lowest_corr.asset_1} and {lowest_corr.asset_2}')
-    
 
-    if return_heatmap:
+    if show_heatmap == True:
         fig, ax = plt.subplots(figsize=(matrix_size * 1.5, matrix_size))
         heatmap = sns.heatmap(
             correlation_matrix, 
@@ -894,43 +685,326 @@ def calc_correlations(
             yticklabels=correlation_matrix.columns,
             annot=True,
         )
-        return heatmap
+        plt.show()
 
+    if return_matrix:
+        return correlation_matrix
+    else:
+        return None
     
-    return correlation_matrix
 
+
+def calc_ewma_volatility(
+        returns: pd.Series,
+        theta : float = 0.94,
+        initial_vol : float = .2 / np.sqrt(252)
+    ) -> pd.Series:
+    var_t0 = initial_vol ** 2
+    ewma_var = [var_t0]
+    for i in range(len(returns.index)):
+        new_ewma_var = ewma_var[-1] * theta + (returns.iloc[i] ** 2) * (1 - theta)
+        ewma_var.append(new_ewma_var)
+    ewma_var.pop(0) # Remove var_t0
+    ewma_vol = [np.sqrt(v) for v in ewma_var]
+    return pd.Series(ewma_vol, index=returns.index)
+
+
+def calc_garch_volatility(
+        returns: pd.Series,
+        p: int = 1,
+        q: int = 1
+    ):
+    model = arch_model(returns, vol='Garch', p=p, q=q)
+    fitted_model = model.fit(disp='off')
+    fitted_values = fitted_model.conditional_volatility
+    return pd.Series(fitted_values, index=returns.index)
+
+
+def calc_var_cvar_summary(
+    returns: Union[pd.Series, pd.DataFrame],
+    percentile: Union[None, float] = .05,
+    window: Union[None, str] = None,
+    return_hit_ratio: bool = False,
+    filter_first_hit_ratio_date: Union[None, str, datetime.date] = None,
+    z_score: float = None,
+    shift: int = 1,
+    std_formula: bool = False,
+    ewma_theta : float = .94,
+    ewma_initial_vol : float = .2 / np.sqrt(252),
+    garch_p: int = 1,
+    garch_q: int = 1,
+    return_stats: Union[str, list] = ['Returns', 'VaR', 'CVaR', 'Vol'],
+    keep_columns: Union[list, str] = None,
+    drop_columns: Union[list, str] = None,
+    keep_indexes: Union[list, str] = None,
+    drop_indexes: Union[list, str] = None
+):
+    """
+    Calculates a summary of VaR (Value at Risk) and CVaR (Conditional VaR) for the provided returns.
+
+    Parameters:
+    returns (pd.Series or pd.DataFrame): Time series of returns.
+    percentile (float or None, default=0.05): Percentile to calculate the VaR and CVaR.
+    window (str or None, default=None): Window size for rolling calculations.
+    return_hit_ratio (bool, default=False): If True, returns the hit ratio for the VaR.
+    filter_first_hit_ratio_date (str, datetime.date or None, default=None): Date to filter the hit ratio calculation from then on.
+    z_score (float, default=None): Z-score for parametric VaR calculation, in case no percentile is provided.
+    shift (int, default=1): Period shift for VaR/CVaR calculations.
+    std_formula (bool, default=False): If True, uses the normal volatility formula with .std(). Else, use squared returns.
+    return_stats (str or list, default=['Returns', 'VaR', 'CVaR', 'Vol']): Statistics to return in the summary.
+    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
+    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
+    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
+    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
+
+    Returns:
+    pd.DataFrame: Summary of VaR and CVaR statistics.
+    """
+    if window is None:
+        print('Using "window" of 60 periods, since none was specified')
+        window = 60
+    if isinstance(returns, pd.DataFrame):
+        returns_series = returns.iloc[:, 0]
+        returns_series.index = returns.index
+        returns = returns_series.copy()
+    elif isinstance(returns, pd.Series):
+        returns = returns.copy()
+    else:
+        raise TypeError('returns must be either a pd.DataFrame or a pd.Series')
+
+    summary = pd.DataFrame({})
+
+    # Returns
+    summary[f'Returns'] = returns
+
+    # VaR
+    summary[f'Expanding {window} Historical VaR ({percentile:.0%})'] = returns.expanding(min_periods=window).quantile(percentile)
+    summary[f'Rolling {window} Historical VaR ({percentile:.0%})'] = returns.rolling(window=window).quantile(percentile)
+    if std_formula:
+        summary[f'Expanding {window} Volatility'] = returns.expanding(window).std()
+        summary[f'Rolling {window} Volatility'] = returns.rolling(window).std()
+    else: # Volaility assuming zero mean returns
+        summary[f'Expanding {window} Volatility'] = np.sqrt((returns ** 2).expanding(window).mean())
+        summary[f'Rolling {window} Volatility'] = np.sqrt((returns ** 2).rolling(window).mean())
+    summary[f'EWMA {ewma_theta:.2f} Volatility'] = calc_ewma_volatility(returns, theta=ewma_theta, initial_vol=ewma_initial_vol)
+    summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility'] = calc_garch_volatility(returns, p=garch_p, q=garch_q)
     
+    # Parametric VaR assuming zero mean returns
+    z_score = norm.ppf(percentile) if z_score is None else z_score
+    summary[f'Expanding {window} Parametric VaR ({percentile:.0%})'] = summary[f'Expanding {window} Volatility'] * z_score
+    summary[f'Rolling {window} Parametric VaR ({percentile:.0%})'] = summary[f'Rolling {window} Volatility'] * z_score
+    summary[f'EWMA {ewma_theta:.2f} Parametric VaR ({percentile:.0%})'] = summary[f'EWMA {ewma_theta:.2f} Volatility'] * z_score
+    summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametric VaR ({percentile:.0%})'] = summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility'] * z_score
+
+    if return_hit_ratio:
+        var_stats = [
+            f'Expanding {window} Historical VaR ({percentile:.0%})',
+            f'Rolling {window} Historical VaR ({percentile:.0%})',
+            f'Expanding {window} Parametric VaR ({percentile:.0%})',
+            f'Rolling {window} Parametric VaR ({percentile:.0%})',
+            f'EWMA {ewma_theta:.2f} Parametric VaR ({percentile:.0%})',
+            f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametric VaR ({percentile:.0%})'
+        ]
+        
+        summary_hit_ratio = summary.copy()
+        summary_hit_ratio[var_stats] = summary_hit_ratio[var_stats].shift()
+        if filter_first_hit_ratio_date:
+            if isinstance(filter_first_hit_ratio_date, (datetime.date, datetime.datetime)):
+                filter_first_hit_ratio_date = filter_first_hit_ratio_date.strftime("%Y-%m-%d")
+            summary_hit_ratio = summary.loc[filter_first_hit_ratio_date:]
+        summary_hit_ratio = summary_hit_ratio.dropna(axis=0)
+        summary_hit_ratio[var_stats] = summary_hit_ratio[var_stats].apply(lambda x: (x - summary['Returns']) > 0)
+        
+        hit_ratio = pd.DataFrame(summary_hit_ratio[var_stats].mean(), columns=['Hit Ratio'])
+        hit_ratio['Hit Ratio Error'] = (hit_ratio['Hit Ratio'] - percentile) / percentile
+        hit_ratio['Hit Ratio Absolute Error'] = abs(hit_ratio['Hit Ratio Error'])
+        hit_ratio = hit_ratio.sort_values('Hit Ratio Absolute Error')
+
+        if z_score is not None:
+            hit_ratio = hit_ratio.rename(lambda col: re.sub(r'VaR \(\d+%\)', f'VaR ({z_score:.2f})', col), axis=1) # Rename columns
+        return filter_columns_and_indexes(
+            hit_ratio,
+            keep_columns=keep_columns,
+            drop_columns=drop_columns,
+            keep_indexes=keep_indexes,
+            drop_indexes=drop_indexes
+        )
+
+    # CVaR
+    summary[f'Expanding {window} Historical CVaR ({percentile:.0%})'] = returns.expanding(window).apply(lambda x: x[x < x.quantile(percentile)].mean())
+    summary[f'Rolling {window} Historical CVaR ({percentile:.0%})'] = returns.rolling(window).apply(lambda x: x[x < x.quantile(percentile)].mean())
+    summary[f'Expanding {window} Parametrical CVaR ({percentile:.0%})'] = - norm.pdf(z_score) / percentile * summary[f'Expanding {window} Volatility']
+    summary[f'Rolling {window} Parametrical CVaR ({percentile:.0%})'] = - norm.pdf(z_score) / percentile * summary[f'Rolling {window} Volatility']
+    summary[f'EWMA {ewma_theta:.2f} Parametrical CVaR ({percentile:.0%})'] = - norm.pdf(z_score) / percentile * summary[f'EWMA {ewma_theta:.2f} Volatility']
+    summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametrical CVaR ({percentile:.0%})'] = - norm.pdf(z_score) / percentile * summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility']
+
+    if shift > 0:
+        shift_columns = [c for c in summary.columns if not bool(re.search("returns", c))]
+        summary[shift_columns] = summary[shift_columns].shift(shift).dropna()
+        print(f'VaR and CVaR are given shifted by {shift:0f} period(s).')
+    else:
+        print('VaR and CVaR are given in-sample.')
+
+    return_stats = [return_stats.lower()] if isinstance(return_stats, str) else [s.lower() for s in return_stats]
+    return_stats = list(map(lambda x: 'volatility' if x == 'vol' else x, return_stats))
+    
+    if z_score is not None:
+        summary = summary.rename(lambda col: re.sub(r'VaR \(\d+%\)', f'VaR ({z_score:.2f})', col), axis=1)
+
+    if return_stats == ['all'] or set(return_stats) == set(['returns', 'var', 'cvar', 'volatility']):
+        summary = summary.loc[:, lambda df: df.columns.map(lambda c: bool(re.search(r"\b" + r"\b|\b".join(return_stats) + r"\b", c.lower())))]
+        
+    return filter_columns_and_indexes(
+        summary,
+        keep_columns=keep_columns,
+        drop_columns=drop_columns,
+        keep_indexes=keep_indexes,
+        drop_indexes=drop_indexes
+    )
+
+
+def plot_var(
+        returns: Union[pd.DataFrame, pd.Series],
+        var: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+        percentile: Union[None, float] = .05,
+        figsize: tuple = (15, 7),
+        limit = True,
+        colors: Union[list, str] = ["blue", "red", "orange", "green", "purple", "black", "grey", "pink", "brown", "cyan", "magenta", "yellow"],
+        var_name: str = None,
+        is_excess_returns: bool = False
+        ):
+    """
+    Plots a variance graph with returns and highlights returns < VaR 
+
+    Parameters:
+    returns (pd.DataFrame, pd.Series or None): Time series of returns.
+    var (pd.DataFrame, pd.Series or List or pd.Series): Time series of VaR.
+    percentile (float or None, default=.05): Percentile to calculate the hit ratio.
+    limit (bool, default=True): If True, limits the y-axis to the minimum return.
+    figsize (tuple, default=(15, 7)): Size of the plot.
+    colors (list or str, default=["blue", "red", "orange", "green", "purple", "black", "grey", "pink", "brown", "cyan", "magenta", "yellow"]): Colors for the plot.
+    var_name (str, default='VaR'): Name for the VaR column to be uses
+    is_excess_returns (bool, default=False): If True, adjust y-axis label accordingly.
+
+    """
+    var = returns_to_df(var, "VaR") # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(var) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+
+    returns = returns_to_df(returns, "Returns")
+    fix_dates_index(returns)
+    returns = pd.merge(returns, var, left_index=True, right_index=True).dropna()
+    
+    asset_name = returns.columns[0]
+    if asset_name == 0:
+        asset_name = "Asset"
+
+    if var_name is None:
+        if isinstance(var, pd.DatFrame):
+            var_name = var.columns[0]
+            if var_name == 0:
+                var_name = "VaR"
+
+    returns.columns = [asset_name, var_name]
+
+    plt.figure(figsize=figsize)
+    plt.axhline(y=0, linestyle='--', color='black', alpha=0.5)
+
+    # Plot returns
+    plt.plot(
+        returns.index,
+        returns[asset_name],
+        color=colors[2],
+        label=f"{asset_name} Returns",
+        alpha=.2
+    )
+
+    if var.shape[1] == 1:
+
+        plt.plot(
+            returns.index,
+            returns[var_name],
+            color=colors[0],
+            label=var_name
+        )
+        excess_returns_surpass_var = (
+            returns
+            .dropna()
+            .loc[lambda df: df[asset_name] < df[var_name]]
+        )
+        plt.plot(
+            excess_returns_surpass_var.index,
+            excess_returns_surpass_var[asset_name],
+            linestyle="",
+            marker="o",
+            color=colors[1],
+            label=f"Return < {var_name}",
+            markersize=1.5
+        )
+    
+        if limit:
+            plt.ylim(min(returns[asset_name]), .01)
+
+        hit_ratio = len(excess_returns_surpass_var.index) / len(returns.index)
+        hit_ratio_error = abs((hit_ratio / percentile) - 1)
+        plt.title(f"{var_name} of {asset_name} Returns")
+        plt.xlabel(f"Hit Ratio: {hit_ratio:.2%}; Hit Ratio Error: {hit_ratio_error:.2%}")
+        if is_excess_returns:
+            plt.ylabel("Excess Returns")
+        else:
+            plt.ylabel("Returns")
+        plt.legend()
+        plt.show()
+
+    else:
+        for idx, var_series in enumerate(var.columns):
+            plt.plot(
+                returns.index,
+                returns[var_series],
+                color=colors[idx],
+                label=var_series
+            )
+
+        plt.title(f"VaR of {asset_name} Returns")
+        if is_excess_returns:
+            plt.ylabel("Excess Returns")
+        else:
+            plt.ylabel("Returns")
+        plt.legend()
+        plt.show()
+
+    return
+
+
 
 def calc_tangency_port(
-    returns: pd.DataFrame,
+    returns: Union[pd.DataFrame, List[pd.Series]],
     cov_matrix_factor: str = 1,
-    return_graphic: bool = False,
-    return_port_returns: bool = False,
     target_return: Union[None, float] = None,
     annual_factor: int = 12,
+    show_graphic: bool = False,
+    return_port_returns: bool = False,
     name: str = 'Tangency'
 ):
     """
     Calculates tangency portfolio weights based on the covariance matrix of returns.
+        When `target_return` is provided, the weights are rescaled to achieve the target return:
+            - If returns are the "excess returns", then the rescaled tangency portfolio is also in the ~MV frontier.
 
     Parameters:
-    returns (pd.DataFrame): Time series of returns.
+    returns (pd.DataFrame or List of pd.Series): Time series of returns.
     cov_matrix_factor (str, default=1): Weight for the covariance matrix. If 1, uses the sample covariance matrix, otherwise uses a shrinkage estimator.
-    return_graphic (bool, default=False): If True, plots the tangency weights.
-    return_port_returns (bool, default=False): If True, returns the portfolio returns. Otherwise, returns portfolio weights.
     target_return (float or None, default=None): Target return for rescaling weights (annualized).
     annual_factor (int, default=12): Factor for annualizing returns.
+    show_graphic (bool, default=False): If True, plots the tangency weights.
+    return_port_returns (bool, default=False): If True, returns the portfolio returns. Otherwise, returns portfolio weights.
     name (str, default='Tangency'): Name for labeling the weights and portfolio.
 
     Returns:
     pd.DataFrame or pd.Series: Tangency portfolio weights or portfolio returns if `return_port_ret` is True.
     """
-    returns = returns.copy()
-    
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
+
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     # Calculate the covariance matrix
     if cov_matrix_factor == 1:
@@ -947,33 +1021,39 @@ def calc_tangency_port(
     # Calculate the tangency portfolio weights
     scaling = 1 / (ones.T @ cov_matrix_inv @ mu)
     tangency_wts = scaling * (cov_matrix_inv @ mu)
-    tangency_wts = pd.DataFrame(index=returns.columns, data=tangency_wts, columns=[f'{name} Weights'])
+    tangency_wts = pd.DataFrame(index=returns.columns, data=tangency_wts, columns=[f'{name} Portfolio'])
     
     # Calculate the portfolio returns
-    port_returns = returns @ tangency_wts.rename({f'{name} Weights': f'{name} Portfolio'}, axis=1)
+    port_returns = returns @ tangency_wts
 
     # Rescale weights to target return
     if isinstance(target_return, (float, int)):
+        if annual_factor is None:
+            print(f'Assuming monthly returns with annualization term of 12 since none was provided')
+            annual_factor = 12
         scaler = target_return / (port_returns[f'{name} Portfolio'].mean() * annual_factor)
-        tangency_wts[[f'{name} Weights']] *= scaler
+        tangency_wts[[f'{name} Portfolio']] *= scaler
         port_returns *= scaler
-        '''
-        tangency_wts = tangency_wts.rename(
-            {f'{name} Weights': f'{name} Weights Rescaled Target {target_return:.2%}'}, axis=1)
-        port_returns = port_returns.rename(
-            {f'{name} Portfolio': f'{name} Portfolio Rescaled Target {target_return:.2%}'}, axis=1)
-        '''
+        
+        tangency_wts = tangency_wts.rename({f'{name} Portfolio': f'{name} Portfolio (rescaled {target_return:.1%} p.a.)'},axis=1)
+        port_returns = port_returns.rename({f'{name} Portfolio': f'{name} Portfolio (rescaled {target_return:.1%} p.a.)'},axis=1)
+
     
     # Plot the tangency weights
-    if return_graphic:
-        ax = tangency_wts.plot(kind='bar', title=f'{name} Weights')
+    if show_graphic == True:
+        ax = tangency_wts.plot(kind='bar', title=f'{name} Portfolio Weights')
         for p in ax.patches:
             ax.annotate(f'{p.get_height():.2%}', (p.get_x() + p.get_width() / 2., p.get_height()),
                 ha='center', va='center', xytext=(0, 10), textcoords='offset points')
 
     if cov_matrix_factor != 1:
-        port_returns = port_returns.rename(columns=lambda c: c.replace('Tangency', f'Tangency Regularized ({cov_matrix_factor:.2f})'))
-        tangency_wts = tangency_wts.rename(columns=lambda c: c.replace('Tangency', f'Tangency Regularized ({cov_matrix_factor:.2f})'))
+        tangency_wts = tangency_wts.rename({f'{name} Portfolio': f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
+        port_returns = port_returns.rename({f'{name} Portfolio':f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
+        tangency_wts = tangency_wts.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                            f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
+        port_returns = port_returns.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                            f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
+        
         
     if return_port_returns:
         return port_returns
@@ -981,55 +1061,54 @@ def calc_tangency_port(
 
 
 def calc_equal_weights_port(
-    returns: pd.DataFrame,
-    return_graphic: bool = False,
-    return_port_returns: bool = False,
+    returns: Union[pd.DataFrame, List[pd.Series]],
     target_return: Union[float, None] = None,
     annual_factor: int = 12,
+    show_graphic: bool = False,
+    return_port_returns: bool = False,
     name: str = 'Equal Weights'
 ):
     """
     Calculates equal weights for the portfolio based on the provided returns.
 
     Parameters:
-    returns (pd.DataFrame): Time series of returns.
-    return_graphic (bool, default=False): If True, plots the equal weights.
-    return_port_returns (bool, default=False): If True, returns the portfolio returns. Otherwise, returns portfolio weights.
+    returns (pd.DataFrame or List or pd.Series): Time series of returns.
     target_return (float or None, default=None): Target return for rescaling weights (annualized).
+    annual_factor (int, default=12): Factor for annualizing returns.
+    show_graphic (bool, default=False): If True, plots the equal weights.
+    return_port_returns (bool, default=False): If True, returns the portfolio returns. Otherwise, returns portfolio weights.
     name (str, default='Equal Weights'): Name for labeling the portfolio.
 
     Returns:
     pd.DataFrame or pd.Series: Equal portfolio weights or portfolio returns if `return_port_returns` is True.
     """
-    returns = returns.copy()
 
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
-
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     equal_wts = pd.DataFrame(
         index=returns.columns,
         data=[1 / len(returns.columns)] * len(returns.columns),
-        columns=[f'{name}']
+        columns=[f'{name} Portfolio']
     )
-    port_returns = returns @ equal_wts.rename({f'{name}': f'{name} Portfolio'}, axis=1)
+    port_returns = returns @ equal_wts
 
     if isinstance(target_return, (float, int)):
-        scaler = target_return / (port_returns[f'{name} Portfolio'].mean() * annual_factor)
-        equal_wts[[f'{name}']] *= scaler
+        if annual_factor is None:
+            print(f'Assuming monthly returns with annualization term of 12 since none was provided')
+            annual_factor = 12
+        scaler = target_return / (port_returns[f'{name}'].mean() * annual_factor)
+        equal_wts[[f'{name} Portfolio']] *= scaler
         port_returns *= scaler
-        '''
+        
         equal_wts = equal_wts.rename(
-            {f'{name}': f'{name} Rescaled Target {target_return:.2%}'},axis=1)
+            {f'{name} Portfolio': f'{name} Portfolio (rescaled {target_return:.1%} p.a.)'},axis=1)
         port_returns = port_returns.rename(
-            {f'{name} Portfolio': f'{name} Portfolio Rescaled Target {target_return:.2%}'},axis=1)
-        '''
+            {f'{name} Portfolio': f'{name} Portfolio (rescaled {target_return:.1%} p.a.)'},axis=1)
 
     # Plot the equal weights
-    if return_graphic:
-        ax = equal_wts.plot(kind='bar', title=f'{name}')
+    if show_graphic:
+        ax = equal_wts.plot(kind='bar', title=f'{name} Portfolio Weights')
         for p in ax.patches:
             ax.annotate(f'{p.get_height():.2%}', (p.get_x() + p.get_width() / 2., p.get_height()),
                 ha='center', va='center', xytext=(0, 10), textcoords='offset points')
@@ -1040,23 +1119,24 @@ def calc_equal_weights_port(
 
 
 def calc_risk_parity_port(
-    returns: pd.DataFrame,
+    returns: Union[pd.DataFrame, List[pd.Series]],
     optimized: bool = False,
-    return_graphic: bool = False,
-    return_port_returns: bool = False,
     target_return: Union[None, float] = None,
     annual_factor: int = 12,
+    show_graphic: bool = False,
+    return_port_returns: bool = False,
     name: str = 'Risk Parity'
 ):
     """
     Calculates risk parity portfolio weights based on the variance of each asset.
 
     Parameters:
-    returns (pd.DataFrame): Time series of returns.
+    returns (pd.DataFrame or List or pd.Series): Time series of returns.
     optimized (bool, default=False): If True, uses an optimization algorithm to calculate the risk parity weights.
-    return_graphic (bool, default=False): If True, plots the risk parity weights.
-    return_port_returns (bool, default=False): If True, returns the portfolio returns. Otherwise, returns portfolio weights.
     target_return (float or None, default=None): Target return for rescaling weights (annualized).
+    annual_factor (int, default=12): Factor for annualizing returns.
+    show_graphic (bool, default=False): If True, plots the risk parity weights.
+    return_port_returns (bool, default=False): If True, returns the portfolio returns. Otherwise, returns portfolio weights.
     name (str, default='Risk Parity'): Name for labeling the portfolio.
 
     Returns:
@@ -1072,13 +1152,8 @@ def calc_risk_parity_port(
         target_risk = np.mean(risk_contributions)
         return np.sum((risk_contributions - target_risk) ** 2)
 
-
-    returns = returns.copy()
-
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     # Calculaye weights for risk parity
     weights = [1 / returns[asset].var() for asset in returns.columns] # Inverse of the variance (simple approach)
@@ -1095,33 +1170,37 @@ def calc_risk_parity_port(
     risk_parity_wts = pd.DataFrame(
         index=returns.columns,
         data=weights,
-        columns=[f'{name} Weights']
+        columns=[f'{name} Portfolio']
     )
 
-    port_returns = returns @ risk_parity_wts.rename({f'{name} Weights': f'{name} Portfolio'}, axis=1)
+    port_returns = returns @ risk_parity_wts
 
     if isinstance(target_return, (float, int)):
+        if annual_factor is None:
+            print(f'Assuming monthly returns with annualization term of 12 since none was provided')
+            annual_factor = 12
         scaler = target_return / (port_returns[f'{name} Portfolio'].mean() * annual_factor)
-        risk_parity_wts[[f'{name} Weights']] *= scaler
+        risk_parity_wts[[f'{name} Portfolio']] *= scaler
         port_returns *= scaler
-        '''
+
         risk_parity_wts = risk_parity_wts.rename(
-            {f'{name} Weights': f'{name} Weights Rescaled Target {target_return:.2%}'},
-            axis=1
-        )
+            {f'{name} Portfolio': f'{name} Portfolio (rescaled {target_return:.1%} p.a.)'},axis=1)
         port_returns = port_returns.rename(
-            {f'{name} Portfolio': f'{name} Portfolio Rescaled Target {target_return:.2%}'},
-            axis=1
-        )
-        '''
-    
-    if optimized:
-        port_returns = port_returns.rename({f'{name} Portfolio': f'{name} Portfolio (Optimized)'}, axis = 1)
-        risk_parity_wts = risk_parity_wts.rename({f'{name} Weights': f'{name} Weights (Optimized)'}, axis = 1)
+            {f'{name} Portfolio': f'{name} Portfolio (rescaled {target_return:.1%} p.a.)'},axis=1)
+        
+    if optimized == True:
+        port_returns = port_returns.rename({f'{name} Portfolio': f'{name} Portfolio (optimized)'}, axis = 1)
+        risk_parity_wts = risk_parity_wts.rename({f'{name} Portfolio': f'{name} Portfolio (optimized)'}, axis = 1)
+
+        port_returns = port_returns.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                            f'{name} Portfolio (optimized, rescaled {target_return:.1%} p.a.)'}, axis = 1)
+        
+        risk_parity_wts = risk_parity_wts.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                                  f'{name} Portfolio (optimized, rescaled {target_return:.1%} p.a.)'}, axis = 1)
 
     # Plot the risk parity weights
-    if return_graphic:
-        ax = risk_parity_wts.plot(kind='bar', title=f'{name} Weights')
+    if show_graphic:
+        ax = risk_parity_wts.plot(kind='bar', title=f'{name} Portfolio Weights')
         for p in ax.patches:
             ax.annotate(f'{p.get_height():.2%}', (p.get_x() + p.get_width() / 2., p.get_height()),
                 ha='center', va='center', xytext=(0, 10), textcoords='offset points')
@@ -1132,12 +1211,12 @@ def calc_risk_parity_port(
 
 
 def calc_gmv_port(
-    returns: pd.DataFrame,
+    returns: Union[pd.DataFrame, List[pd.Series]],
     cov_matrix_factor: str = 1,
-    return_graphic: bool = False,
-    return_port_returns: bool = False,
     target_return: Union[float, None] = None,
     annual_factor: int = 12,
+    show_graphic: bool = False,
+    return_port_returns: bool = False,
     name: str = 'GMV'
 ):
     """
@@ -1146,20 +1225,17 @@ def calc_gmv_port(
     Parameters:
     returns (pd.DataFrame): Time series of returns.
     cov_matrix_factor (str, default=1): Weight for the covariance matrix. If 1, uses the sample covariance matrix, otherwise uses a shrinkage estimator.
-    return_graphic (bool, default=False): If True, plots the GMV weights.
-    return_port_returns (bool, default=False): If True, returns the portfolio returns. Otherwise, returns portfolio weights.
     target_return (float or None, default=None): Target return for rescaling weights (annualized).
+    annual_factor (int, default=12): Factor for annualizing returns.
+    show_graphic (bool, default=False): If True, plots the GMV weights.
+    return_port_returns (bool, default=False): If True, returns the portfolio returns. Otherwise, returns portfolio weights.
     name (str, default='GMV'): Name for labeling the portfolio.
 
     Returns:
     pd.DataFrame or pd.Series: GMV portfolio weights or portfolio returns if `return_port_ret` is True.
     """
-    returns = returns.copy()
-
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     # Calculate the covariance matrix
     if cov_matrix_factor == 1:
@@ -1175,103 +1251,135 @@ def calc_gmv_port(
     # Calculate the GMV portfolio weights
     scaling = 1 / (ones.T @ cov_matrix_inv @ ones)
     gmv_wts = scaling * cov_matrix_inv @ ones
-    gmv_wts = pd.DataFrame(index=returns.columns, data=gmv_wts, columns=[f'{name} Weights'])
+    gmv_wts = pd.DataFrame(index=returns.columns, data=gmv_wts, columns=[f'{name} Portfolio'])
     
     # Calculate the portfolio returns
-    port_returns = returns @ gmv_wts.rename({f'{name} Weights': f'{name} Portfolio'}, axis=1)
+    port_returns = returns @ gmv_wts
 
     # Rescale weights to target return
     if isinstance(target_return, (float, int)):
-        scaler = target_return / (port_returns[f'{name} Portfolio'].mean() * annual_factor)
-        gmv_wts[[f'{name} Weights']] *= scaler
+        if annual_factor is None:
+            print(f'Assuming monthly returns with annualization term of 12 since none was provided')
+            annual_factor = 12
+        scaler = target_return / (port_returns[f'{name}'].mean() * annual_factor)
+        gmv_wts[[f'{name} Portfolio']] *= scaler
         port_returns *= scaler
-        '''
-        gmv_wts = gmv_wts.rename(
-            {f'{name} Weights': f'{name} Weights Rescaled Target {target_return:.2%}'}, axis=1)
-        port_returns = port_returns.rename(
-            {f'{name} Portfolio': f'{name} Portfolio Rescaled Target {target_return:.2%}'}, axis=1)
-        '''
+
+        gmv_wts = gmv_wts.rename({f'{name} Portfolio': f'{name} Portfolio (rescaled {target_return:.1%} p.a.)'},axis=1)
+        port_returns = port_returns.rename({f'{name} Portfolio': f'{name} Portfolio (rescaled {target_return:.1%} p.a.)'},axis=1)
+        
 
     # Plot the Global Minimum Variance weights
-    if return_graphic:
-        ax = gmv_wts.plot(kind='bar', title=f'{name} Weights')
+    if show_graphic:
+        ax = gmv_wts.plot(kind='bar', title=f'{name} Portfolio Weights')
         for p in ax.patches:
             ax.annotate(f'{p.get_height():.2%}', (p.get_x() + p.get_width() / 2., p.get_height()),
                 ha='center', va='center', xytext=(0, 10), textcoords='offset points')
 
     if cov_matrix_factor != 1:
-        port_returns = port_returns.rename(columns=lambda c: c.replace('Tangency', f'Tangency Regularized ({cov_matrix_factor:.2f})'))
-        tangency_wts = tangency_wts.rename(columns=lambda c: c.replace('Tangency', f'Tangency Regularized ({cov_matrix_factor:.2f})'))
-     
+        gmv_wts = gmv_wts.rename({f'{name} Portfolio': f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
+        port_returns = port_returns.rename({f'{name} Portfolio':f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
+        
+        gmv_wts = gmv_wts.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                            f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
+        port_returns = port_returns.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                            f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
+        
     if return_port_returns:
         return port_returns
 
     return gmv_wts
 
 
-def calc_target_ret_weights(
-    target_ret: float,
-    returns: pd.DataFrame,
-    return_graphic: bool = False,
-    return_port_ret: bool = False
+def calc_mv_port(
+    returns: Union[pd.DataFrame, List[pd.Series]],
+    target_return: float = None,
+    is_excess_returns: bool = None,
+    annual_factor: int = 12,
+    show_graphic: bool = False,
+    return_port_ret: bool = False,
+    name: str = 'MV'
 ):
-    # Have not checked this function yet
-
-    return
+    
     """
     Calculates the portfolio weights to achieve a target return by combining Tangency and GMV portfolios.
 
     Parameters:
-    target_ret (float): Target return for the portfolio.
     returns (pd.DataFrame): Time series of asset returns.
-    return_graphic (bool, default=False): If True, plots the portfolio weights.
+    is_excess_returns (bool, default=False): if True, then assume risk free is available and the MV portfolio with target return is the rescaled tangency portfollio
+                                             if False, then assume risk free is not available and the MV portfolio with target return is a combination of the tangency and GMV portfolios
+    target_return (float): Target return for the portfolio.
+    annual_factor (int, default=12): Factor for annualizing
+    show_graphic (bool, default=False): If True, plots the portfolio weights.
     return_port_returns (bool, default=False): If True, returns the portfolio returns. Otherwise, returns portfolio weights.
 
     Returns:
     pd.DataFrame: Weights of the Tangency and GMV portfolios, along with the combined target return portfolio.
     """
-    returns = returns.copy()
+
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
     
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
+    if not isinstance(target_return, (float, int)):
+        raise ValueError('target_return must be a float or an integer')
     
-    mu_tan = returns.mean() @ calc_tangency_port(returns, cov_mat = 1)
-    mu_gmv = returns.mean() @ calc_gmv_weights(returns)
+    if is_excess_returns is None:
+        raise ValueError('is_excess_returns must be a boolean')
     
-    delta = (target_ret - mu_gmv[0]) / (mu_tan[0] - mu_gmv[0])
-    mv_weights = (delta * calc_tangency_port(returns, cov_mat=1)).values + ((1 - delta) * calc_gmv_weights(returns)).values
+    if annual_factor is None:
+            print(f'Assuming monthly returns with annualization term of 12 since none was provided')
+            annual_factor = 12
     
-    mv_weights = pd.DataFrame(
-        index=returns.columns,
-        data=mv_weights,
-        columns=[f'Target {target_ret:.2%} Weights']
-    )
-    port_returns = returns @ mv_weights.rename({f'Target {target_ret:.2%} Weights': f'Target {target_ret:.2%} Portfolio'}, axis=1)
+    elif is_excess_returns == True:
+        mv_portfolio = calc_tangency_port(
+            returns = returns,
+            target_return = target_return,
+            annual_factor = annual_factor,
+            show_graphic = show_graphic,
+            return_port_returns = return_port_ret
+        )
+        mv_portfolio.columns = [f'{name} Portfolio (target {target_return:.1%})']
+        return mv_portfolio
+    
+    else:
+        tan_weights = calc_tangency_port(returns, cov_matrix_factor=1)
+        gmv_weights = calc_gmv_port(returns)
 
-    if return_graphic:
-        mv_weights.plot(kind='bar', title=f'Target Return of {target_ret:.2%} Weights')
+        mu_tan = returns.mean() @ tan_weights
+        mu_gmv = returns.mean() @ gmv_weights
+        
+        delta = (target_return - mu_gmv[0]) / (mu_tan[0] - mu_gmv[0])
+        mv_weights = (delta * calc_tangency_port(returns, cov_matrix_factor=1)).values + ((1 - delta) * calc_gmv_port(returns)).values
+        
+        mv_weights = pd.DataFrame(
+            index=returns.columns,
+            data=mv_weights,
+            columns=[f'{name} Portfolio (target {target_return:.1%})']
+        )
 
-    if return_port_ret:
-        return port_returns
+        port_returns = returns @ mv_weights
+        
+        if show_graphic:
+            mv_weights.plot(kind='bar', title=f'{name} Portfolio (target {target_return:.1%}) Weights')
 
-    mv_weights['Tangency Weights'] = calc_tangency_port(returns, cov_mat=1).values
-    mv_weights['GMV Weights'] = calc_gmv_weights(returns).values
+        if return_port_ret:
+            return port_returns
+        
+        #mv_weights['Tangency Portfolio'] = gmv_weights.values
+        #mv_weights['GMV Portfolio'] = gmv_weights.values
+        return mv_weights
 
-    return mv_weights
 
-
-def get_regression_statistics(
-    y: Union[pd.DataFrame, pd.Series],
-    x: Union[pd.DataFrame, pd.Series],
+def calc_regression(
+    y: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    x: Union[pd.DataFrame, pd.Series, List[pd.Series]],
     intercept: bool = True,
     annual_factor: Union[None, int] = None,
     return_model: bool = False,
     return_fitted_values: bool = False,
     p_values: bool = True,
     tracking_error: bool = True,
-    treynor_info_ratio: bool = True,
+    treynor_info_ratio: bool = False,
     sortino_ratio: bool = False,
     timeframes: Union[None, dict] = None,
     keep_columns: Union[list, str] = None,
@@ -1284,8 +1392,8 @@ def get_regression_statistics(
     Performs an OLS regression on the provided return data with optional intercept, timeframes, statistical ratios, and performance ratios.
 
     Parameters:
-    y (pd.DataFrame or pd.Series): Dependent variable(s) for the regression.
-    X (pd.DataFrame or pd.Series): Independent variable(s) for the regression.
+    y (pd.DataFrame, pd.Series or List or pd.Series): Dependent variable(s) for the regression.
+    X (pd.DataFrame, pd.Series or List or pd.Series): Independent variable(s) for the regression.
     intercept (bool, default=True): If True, includes an intercept in the regression.
     annual_factor (int or None, default=None): Factor for annualizing regression statistics.
     return_model (bool, default=False): If True, returns the regression model object.
@@ -1305,30 +1413,11 @@ def get_regression_statistics(
     pd.DataFrame or model: Regression summary statistics or the model if `return_model` is True.
     """
 
-    x = x.copy()
-    y = y.copy()
+    x = returns_to_df(x) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(x) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
-    if isinstance(x, pd.Series):
-        x = x.to_frame()
-    elif not isinstance(x, pd.DataFrame):
-        raise TypeError('x must be either a pd.DataFrame or a pd.Series')
-    
-    
-    if isinstance(y, pd.Series):
-        y = y.to_frame()
-    elif not isinstance(y, pd.DataFrame):
-        raise TypeError('y must be either a pd.DataFrame or a pd.Series')
-
-    if 'date' in x.columns.str.lower():
-        x = x.rename({'Date': 'date'}, axis=1)
-        x = x.set_index('date')
-    x.index.name = 'date'
-
-    if 'date' in y.columns.str.lower():
-        y = y.rename({'Date': 'date'}, axis=1)
-        y = y.set_index('date')
-    y.index.name = 'date'
-
+    y = returns_to_df(y) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(y) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     if annual_factor is None:
         print("Regression assumes 'annual_factor' equals to 12 since it was not provided")
@@ -1414,12 +1503,13 @@ def get_regression_statistics(
         ols_results = ols_model.fit()
 
         if return_model:
-            print(ols_results.summary())
+            return(ols_results)
 
         elif return_fitted_values:
             fitted_values = ols_results.fittedvalues
             fitted_values = fitted_values.rename(f'{y_asset}^')
             fitted_values_all[y_asset] = fitted_values
+            return fitted_values_all
 
         else:
             # Calculate/get statistics:
@@ -1440,10 +1530,10 @@ def get_regression_statistics(
             betas_p_values = ols_results.pvalues[1:] if intercept else ols_results.pvalues
             
             for i in range(len(X_names)):
-                regression_statistics.loc[y_asset, f"Beta ({X_names[i]})"] = betas[i] # Betas
+                regression_statistics.loc[y_asset, f"Beta ({X_names[i]})"] = betas.iloc[i] # Betas
                 if p_values == True: 
-                    regression_statistics.loc[y_asset, f"P-Value ({X_names[i]})"] = betas_p_values[i] # Beta p-values
-        
+                    regression_statistics.loc[y_asset, f"P-Value ({X_names[i]})"] = betas_p_values.iloc[i] # Beta p-values
+
             if tracking_error == True:
                 regression_statistics.loc[y_asset, 'Tracking Error'] = ols_results.resid.std() * (annual_factor ** 0.5) # Annualized Residuals Volatility
                 regression_statistics.loc[y_asset, 'Annualized Tracking Error'] = regression_statistics.loc[y_asset, 'Tracking Error'] * (annual_factor ** 0.5) # Annualized Residuals Volatility
@@ -1455,9 +1545,9 @@ def get_regression_statistics(
                     regression_statistics[y_asset, 'Annualized Treynor Ratio'] = regression_statistics[y_asset, 'Treynor Ratio'] * annual_factor # Annualized Treynor Ratio
                 except:
                     print('SPY is not a factor in the regression. Treynor Ratio cannot be calculated.')
-
-                regression_statistics.loc[y_asset, 'Information Ratio'] = regression_statistics.loc[y_asset, 'Alpha'] / ols_results.resid.std() # Information Ratio
-                regression_statistics.loc[y_asset, 'Annualized Information Ratio'] = regression_statistics.loc[y_asset, 'Information Ratio'] * (annual_factor ** 0.5) # Annualized Information Ratio
+                if intercept:
+                    regression_statistics.loc[y_asset, 'Information Ratio'] = regression_statistics.loc[y_asset, 'Alpha'] / ols_results.resid.std() # Information Ratio
+                    regression_statistics.loc[y_asset, 'Annualized Information Ratio'] = regression_statistics.loc[y_asset, 'Information Ratio'] * (annual_factor ** 0.5) # Annualized Information Ratio
             
             regression_statistics.loc[y_asset, 'Fitted Mean'] = ols_results.fittedvalues.mean()
             regression_statistics.loc[y_asset, 'Annualized Fitted Std Dev'] = regression_statistics.loc[y_asset, 'Fitted Mean'] * annual_factor
@@ -1467,8 +1557,6 @@ def get_regression_statistics(
                 except Exception as e:
                     print(f'Cannot calculate Sortino Ratio: {str(e)}. Set "calc_sortino_ratio" to False or review function')
     
-    if return_model or return_fitted_values:
-        return
     else:
         return filter_columns_and_indexes(
             regression_statistics,
@@ -1634,7 +1722,6 @@ def calc_replication_oos(
     Returns:
     pd.DataFrame: Summary statistics for the out-of-sample replication.
     """
-    raise Exception("Function not available - needs testing prior to use")
     try:
         y = y.copy()
         X = X.copy()
@@ -1647,7 +1734,7 @@ def calc_replication_oos(
         X = X.set_index('date')
     X.index.name = 'date'
 
-    X = X.shift(lag_number)
+    X = X.shift(lag_number) # Lag the predictors
 
     df = y.join(X, how='inner')
     y = df.iloc[:, [0]].copy()
@@ -1848,285 +1935,6 @@ def calc_replication_oos_not_lagged_features(
         keep_indexes=keep_indexes,
         drop_indexes=drop_indexes
     )
-
-
-def calc_portfolio_returns(
-    returns: pd.DataFrame,
-    weights: Union[dict, list, pd.Series, pd.DataFrame],
-    port_name: Union[None, str] = None
-):
-    """
-    Creates a portfolio by applying the specified weights to the asset returns.
-
-    Parameters:
-    returns (pd.DataFrame): Time series of asset returns.
-    weights (list or pd.Series): Weights to apply to the returns. If a list or pd.Series is provided, it will be converted into a dict.
-    port_name (str or None, default=None): Name for the portfolio. If None, a name will be generated based on asset weights.
-
-    Returns:
-    pd.DataFrame: The portfolio returns based on the provided weights.
-    """
-
-    returns = returns.copy()
-
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
-
-    # Check returns size and weight size:
-    if returns.shape[1] != len(weights):
-        raise Exception(f"Returns have {returns.shape[1]} assets, but {len(weights)} weights were provided")
-    
-    if isinstance(weights, list):
-        weights = dict(zip(returns.columns, weights))
-    elif isinstance(weights, pd.Series):
-        weights = weights.to_dict()
-    elif isinstance(weights, pd.DataFrame):
-        list(weights.to_dict().values())[0]
-    elif isinstance(weights, dict):
-        pass
-    else:
-        raise Exception("Weights must be a dict, list, pd.Series, or pd.DataFrame")
-
-
-    returns = returns[list(weights.keys())]
-    port_returns = pd.DataFrame(returns @ list(weights.values()))
-
-    if port_name is None:
-        print("Portfolio:"+" + ".join([f"{n} ({w:.2%})" for n, w in weights.items()]))
-        port_name = 'Portfolio'
-    port_returns.columns = [port_name]
-    return port_returns
-
-
-def calc_ewma_volatility(
-        returns: pd.Series,
-        theta : float = 0.94,
-        initial_vol : float = .2 / np.sqrt(252)
-    ) -> pd.Series:
-    var_t0 = initial_vol ** 2
-    ewma_var = [var_t0]
-    for i in range(len(returns.index)):
-        new_ewma_var = ewma_var[-1] * theta + (returns.iloc[i] ** 2) * (1 - theta)
-        ewma_var.append(new_ewma_var)
-    ewma_var.pop(0) # Remove var_t0
-    ewma_vol = [np.sqrt(v) for v in ewma_var]
-    return pd.Series(ewma_vol, index=returns.index)
-
-
-def calc_garch_volatility(
-        returns: pd.Series,
-        p: int = 1,
-        q: int = 1
-    ):
-    model = arch_model(returns, vol='Garch', p=p, q=q)
-    fitted_model = model.fit(disp='off')
-    fitted_values = fitted_model.conditional_volatility
-    return pd.Series(fitted_values, index=returns.index)
-
-
-def calc_var_cvar_summary(
-    returns: Union[pd.Series, pd.DataFrame],
-    percentile: Union[None, float] = .05,
-    window: Union[None, str] = None,
-    return_hit_ratio: bool = False,
-    filter_first_hit_ratio_date: Union[None, str, datetime.date] = None,
-    z_score: float = None,
-    shift: int = 1,
-    std_formula: bool = False,
-    ewma_theta : float = .94,
-    ewma_initial_vol : float = .2 / np.sqrt(252),
-    garch_p: int = 1,
-    garch_q: int = 1,
-    return_stats: Union[str, list] = ['Returns', 'VaR', 'CVaR', 'Vol'],
-    keep_columns: Union[list, str] = None,
-    drop_columns: Union[list, str] = None,
-    keep_indexes: Union[list, str] = None,
-    drop_indexes: Union[list, str] = None
-):
-    """
-    Calculates a summary of VaR (Value at Risk) and CVaR (Conditional VaR) for the provided returns.
-
-    Parameters:
-    returns (pd.Series or pd.DataFrame): Time series of returns.
-    percentile (float or None, default=0.05): Percentile to calculate the VaR and CVaR.
-    window (str or None, default=None): Window size for rolling calculations.
-    return_hit_ratio (bool, default=False): If True, returns the hit ratio for the VaR.
-    filter_first_hit_ratio_date (str, datetime.date or None, default=None): Date to filter the hit ratio calculation from then on.
-    z_score (float, default=None): Z-score for parametric VaR calculation, in case no percentile is provided.
-    shift (int, default=1): Period shift for VaR/CVaR calculations.
-    std_formula (bool, default=False): If True, uses the normal volatility formula with .std(). Else, use squared returns.
-    return_stats (str or list, default=['Returns', 'VaR', 'CVaR', 'Vol']): Statistics to return in the summary.
-    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
-    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
-    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
-    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
-
-    Returns:
-    pd.DataFrame: Summary of VaR and CVaR statistics.
-    """
-    if window is None:
-        print('Using "window" of 60 periods, since none was specified')
-        window = 60
-    if isinstance(returns, pd.DataFrame):
-        returns_series = returns.iloc[:, 0]
-        returns_series.index = returns.index
-        returns = returns_series.copy()
-    elif isinstance(returns, pd.Series):
-        returns = returns.copy()
-    else:
-        raise TypeError('returns must be either a pd.DataFrame or a pd.Series')
-
-    summary = pd.DataFrame({})
-
-    # Returns
-    summary[f'Returns'] = returns
-
-    # VaR
-    summary[f'Expanding {window} Historical VaR ({percentile:.2%})'] = returns.expanding(min_periods=window).quantile(percentile)
-    summary[f'Rolling {window} Historical VaR ({percentile:.2%})'] = returns.rolling(window=window).quantile(percentile)
-    if std_formula:
-        summary[f'Expanding {window} Volatility'] = returns.expanding(window).std()
-        summary[f'Rolling {window} Volatility'] = returns.rolling(window).std()
-    else: # Volaility assuming zero mean returns
-        summary[f'Expanding {window} Volatility'] = np.sqrt((returns ** 2).expanding(window).mean())
-        summary[f'Rolling {window} Volatility'] = np.sqrt((returns ** 2).rolling(window).mean())
-    summary[f'EWMA {ewma_theta:.2f} Volatility'] = calc_ewma_volatility(returns, theta=ewma_theta, initial_vol=ewma_initial_vol)
-    summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility'] = calc_garch_volatility(returns, p=garch_p, q=garch_q)
-    
-    # Parametric VaR assuming zero mean returns
-    z_score = norm.ppf(percentile) if z_score is None else z_score
-    summary[f'Expanding {window} Parametric VaR ({percentile:.2%})'] = summary[f'Expanding {window} Volatility'] * z_score
-    summary[f'Rolling {window} Parametric VaR ({percentile:.2%})'] = summary[f'Rolling {window} Volatility'] * z_score
-    summary[f'EWMA {ewma_theta:.2f} Parametric VaR ({percentile:.2%})'] = summary[f'EWMA {ewma_theta:.2f} Volatility'] * z_score
-    summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametric VaR ({percentile:.2%})'] = summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility'] * z_score
-
-    if return_hit_ratio:
-        var_stats = [
-            f'Expanding {window} Historical VaR ({percentile:.2%})',
-            f'Rolling {window} Historical VaR ({percentile:.2%})',
-            f'Expanding {window} Parametric VaR ({percentile:.2%})',
-            f'Rolling {window} Parametric VaR ({percentile:.2%})',
-            f'EWMA {ewma_theta:.2f} Parametric VaR ({percentile:.2%})',
-            f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametric VaR ({percentile:.2%})'
-        ]
-        
-        summary_hit_ratio = summary.copy()
-        summary_hit_ratio[var_stats] = summary_hit_ratio[var_stats].shift()
-        if filter_first_hit_ratio_date:
-            if isinstance(filter_first_hit_ratio_date, (datetime.date, datetime.datetime)):
-                filter_first_hit_ratio_date = filter_first_hit_ratio_date.strftime("%Y-%m-%d")
-            summary_hit_ratio = summary.loc[filter_first_hit_ratio_date:]
-        summary_hit_ratio = summary_hit_ratio.dropna(axis=0)
-        summary_hit_ratio[var_stats] = summary_hit_ratio[var_stats].apply(lambda x: (x - summary['Returns']) > 0)
-        
-        hit_ratio = pd.DataFrame(summary_hit_ratio[var_stats].mean(), columns=['Hit Ratio'])
-        hit_ratio['Hit Ratio Error'] = (hit_ratio['Hit Ratio'] - percentile) / percentile
-        hit_ratio['Hit Ratio Absolute Error'] = abs(hit_ratio['Hit Ratio Error'])
-        hit_ratio = hit_ratio.sort_values('Hit Ratio Absolute Error')
-        return filter_columns_and_indexes(
-            hit_ratio,
-            keep_columns=keep_columns,
-            drop_columns=drop_columns,
-            keep_indexes=keep_indexes,
-            drop_indexes=drop_indexes
-        )
-
-    # CVaR
-    summary[f'Expanding {window} Historical CVaR ({percentile:.2%})'] = returns.expanding(window).apply(lambda x: x[x < x.quantile(percentile)].mean())
-    summary[f'Rolling {window} Historical CVaR ({percentile:.2%})'] = returns.rolling(window).apply(lambda x: x[x < x.quantile(percentile)].mean())
-    summary[f'Expanding {window} Parametrical CVaR ({percentile:.2%})'] = - norm.pdf(z_score) / percentile * summary[f'Expanding {window} Volatility']
-    summary[f'Rolling {window} Parametrical CVaR ({percentile:.2%})'] = - norm.pdf(z_score) / percentile * summary[f'Rolling {window} Volatility']
-    summary[f'EWMA {ewma_theta:.2f} Parametrical CVaR ({percentile:.2%})'] = - norm.pdf(z_score) / percentile * summary[f'EWMA {ewma_theta:.2f} Volatility']
-    summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametrical CVaR ({percentile:.2%})'] = - norm.pdf(z_score) / percentile * summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility']
-
-    if shift > 0:
-        shift_columns = [c for c in summary.columns if not bool(re.search("returns", c))]
-        summary[shift_columns] = summary[shift_columns].shift(shift).dropna()
-        print(f'VaR and CVaR are given shifted by {shift:0f} period(s).')
-    else:
-        print('VaR and CVaR are given in-sample.')
-
-    return_stats = [return_stats.lower()] if isinstance(return_stats, str) else [s.lower() for s in return_stats]
-    return_stats = list(map(lambda x: 'volatility' if x == 'vol' else x, return_stats))
-    
-    if return_stats == ['all'] or set(return_stats) == set(['returns', 'var', 'cvar', 'volatility']):
-        summary = summary.loc[:, lambda df: df.columns.map(lambda c: bool(re.search(r"\b" + r"\b|\b".join(return_stats) + r"\b", c.lower())))]
-        
-    return filter_columns_and_indexes(
-        summary,
-        keep_columns=keep_columns,
-        drop_columns=drop_columns,
-        keep_indexes=keep_indexes,
-        drop_indexes=drop_indexes
-    )
-
-def plot_var(
-        returns: Union[pd.DataFrame, pd.Series],
-        var: Union[pd.DataFrame, pd.Series],
-        var_name: str = 'VaR',
-        percentile: Union[None, float] = .05,
-        figsize: tuple = (15, 7),
-        limit = True,
-        colors: Union[list, str] = ["blue", "red", "orange"]
-        ):
-    """
-    Plots a variance graph with returns and highlights returns < VaR 
-
-    Parameters:
-
-    """
-    if not isinstance(returns, (pd.DataFrame, pd.Series)):
-       raise TypeError('returns must be either a pd.DataFrame or a pd.Series')
-    if not isinstance(var, (pd.DataFrame, pd.Series)):
-        raise TypeError('var must be either a pd.DataFrame or a pd.Series')
-    
-    returns = pd.merge(returns, var, left_index=True, right_index=True).dropna()
-    asset_name = returns.columns[0]
-    returns.columns = [asset_name, var_name]
-
-    excess_returns_surpass_var = (
-        returns
-        .dropna()
-        .loc[lambda df: df[asset_name] < df[var_name]]
-    )
-    plt.figure(figsize=figsize)
-    plt.axhline(y=0, linestyle='--', color='black', alpha=0.5)
-    plt.plot(
-        returns.index,
-        returns[var_name],
-        color=colors[0],
-        label=var_name
-    )
-    plt.plot(
-        returns.index,
-        returns[asset_name],
-        color=colors[2],
-        label=f"{asset_name} Returns",
-        alpha=.2
-    )
-    plt.plot(
-        excess_returns_surpass_var.index,
-        excess_returns_surpass_var[asset_name],
-        linestyle="",
-        marker="o",
-        color=colors[1],
-        label=f"Return < {var_name}",
-        markersize=1.5
-    )
-    if limit:
-        plt.ylim(min(returns[asset_name]), .01)
-
-    hit_ratio = len(excess_returns_surpass_var.index) / len(returns.index)
-    hit_ratio_error = abs((hit_ratio / percentile) - 1)
-    plt.title(f"{var_name} of SPY Excess Returns")
-    plt.xlabel(f"Hit Ratio: {hit_ratio:.2%}; Hit Ratio Error: {hit_ratio_error:.2%}")
-    plt.ylabel("Excess Returns")
-    plt.legend()
-    plt.show()
-
-    return
 
 
 def calc_rolling_oos_port(

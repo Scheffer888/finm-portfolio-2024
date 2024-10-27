@@ -1211,6 +1211,153 @@ def calc_regression(
     )
 
 
+def calc_cross_section_regression(
+    returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    factors: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    annual_factor: int = None,
+    provided_excess_returns: bool = None,
+    rf: pd.Series = None,
+    return_model: bool = False,
+    name: str = None,
+    return_mae: bool = True,
+    intercept_cross_section: bool = True,
+    return_historical_premium: bool = True,
+    return_annualized_premium: bool = True,
+    compare_premiums: bool = False,
+    keep_columns: Union[list, str] = None,
+    drop_columns: Union[list, str] = None,
+    keep_indexes: Union[list, str] = None,
+    drop_indexes: Union[list, str] = None
+):
+    """
+    Performs a cross-sectional regression on the provided returns and factors.
+
+    Parameters:
+    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
+    factors (pd.DataFrame, pd.Series or List or pd.Series): Time series of factor data.
+    annual_factor (int, default=None): Factor for annualizing returns.
+    provided_excess_returns (bool, default=None): Whether excess returns are already provided.
+    rf (pd.Series, default=None): Risk-free rate data for subtracting from returns.
+    return_model (bool, default=False): If True, returns the regression model.
+    name (str, default=None): Name for labeling the regression.
+    return_mae (bool, default=True): If True, returns the mean absolute error of the regression.
+    intercept_cross_section (bool, default=True): If True, includes an intercept in the cross-sectional regression.
+    return_historical_premium (bool, default=True): If True, returns the historical premium of factors.
+    return_annualized_premium (bool, default=True): If True, returns the annualized premium of factors.
+    compare_premiums (bool, default=False): If True, compares the historical and estimated premiums.
+    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
+    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
+    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
+    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
+
+    Returns:
+    pd.DataFrame or model: Cross-sectional regression output or the model if `return_model` is True.
+    """
+
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+
+    factors = returns_to_df(factors) # Convert factors to DataFrame if it is a Series or a list of Series
+    fix_dates_index(factors) # Fix the date index of the DataFrame if it is not in datetime format and convert factors to float
+    
+    if rf is not None:
+        rf = returns_to_df(rf) # Convert rf to DataFrame if it is a Series or a list of Series
+        fix_dates_index(rf) # Fix the date index of the DataFrame if it is not in datetime format and convert rf to float
+    
+    if compare_premiums:
+        return_historical_premium = True
+        return_annualized_premium = True
+
+    if annual_factor is None:
+        print('Assuming monthly returns with annualization term of 12')
+        annual_factor = 12
+
+    if provided_excess_returns is None:
+        print('Assuming excess returns were provided')
+        provided_excess_returns = True
+    elif provided_excess_returns is False:
+        if rf is not None:
+            if len(rf.index) != len(returns.index):
+                raise Exception('"rf" index must be the same lenght as "returns"')
+            print('"rf" is used to subtract returns')
+            returns = returns.sub(rf, axis=0)
+    
+    time_series_regressions = calc_iterative_regression(returns, factors, annual_factor=annual_factor, warnings=False)
+    time_series_betas = time_series_regressions.filter(regex='Beta$', axis=1)
+    time_series_historical_returns = time_series_regressions[['Fitted Mean']]
+    cross_section_regression = calc_regression(
+        time_series_historical_returns, time_series_betas,
+        annual_factor=annual_factor, intercept=intercept_cross_section,
+        return_model=return_model, warnings=False
+    )
+
+    if return_model:
+        return cross_section_regression
+    cross_section_regression = cross_section_regression.rename(columns=lambda c: c.replace(' Beta Beta', ' Lambda').replace('Alpha', 'Eta'))
+    if name is None:
+        name = " + ".join([c.replace(' Lambda', '') for c in cross_section_regression.filter(regex=' Lambda$', axis=1).columns])
+    cross_section_regression.index = [f'{name} Cross-Section Regression']
+    cross_section_regression.drop([
+        'Information Ratio', 'Annualized Information Ratio', 'Tracking Error', 'Annualized Tracking Error', 'Fitted Mean', 'Annualized Fitted Mean'
+    ], axis=1, inplace=True)
+    if return_annualized_premium:
+        factors_annualized_premium = (
+            cross_section_regression
+            .filter(regex=' Lambda$', axis=1)
+            .apply(lambda x: x * annual_factor)
+            .rename(columns=lambda c: c.replace(' Lambda', ' Annualized Lambda'))
+        )
+        cross_section_regression = cross_section_regression.join(factors_annualized_premium)
+
+    if return_historical_premium:
+        print('Lambda represents the premium calculated by the cross-section regression and the historical premium is the average of the factor excess returns')
+        factors_historical_premium = factors.mean().to_frame(f'{name} Cross-Section Regression').transpose().rename(columns=lambda c: c + ' Historical Premium')
+        cross_section_regression = cross_section_regression.join(factors_historical_premium)
+        if return_annualized_premium:
+            factors_annualized_historical_premium = (
+                factors_historical_premium
+                .apply(lambda x: x * annual_factor)
+                .rename(columns=lambda c: c.replace(' Historical Premium', ' Annualized Historical Premium'))
+            )
+            cross_section_regression = cross_section_regression.join(factors_annualized_historical_premium)
+
+    if compare_premiums:
+        cross_section_regression = cross_section_regression.filter(regex='Lambda$|Historical Premium$', axis=1)
+        cross_section_regression = cross_section_regression.transpose()
+        cross_section_regression['Factor'] = cross_section_regression.index.str.extract(f'({"|".join(list(factors.columns))})').values
+        cross_section_regression['Premium Type'] = cross_section_regression.index.str.replace(f'({"|".join(list(factors.columns))})', '')
+        premiums_comparison = cross_section_regression.pivot(index='Factor', columns='Premium Type', values=f'{name} Cross-Section Regression')
+        premiums_comparison.columns.name = None
+        premiums_comparison.index.name = None
+        premiums_comparison.join(calc_tangency_port(factors))
+        premiums_comparison = premiums_comparison.join(factors.corr().rename(columns=lambda c: c + ' Correlation'))
+        return filter_columns_and_indexes(
+            premiums_comparison,
+            keep_columns=keep_columns,
+            drop_columns=drop_columns,
+            keep_indexes=keep_indexes,
+            drop_indexes=drop_indexes
+        )
+    
+    if return_mae:
+        cross_section_regression['TS MAE'] = time_series_regressions['Alpha'].abs().mean()
+        cross_section_regression['TS Annualized MAE'] = time_series_regressions['Annualized Alpha'].abs().mean()
+        cross_section_regression_model = calc_regression(
+            time_series_historical_returns, time_series_betas,
+            annual_factor=annual_factor, intercept=intercept_cross_section,
+            return_model=True, warnings=False
+        )
+        cross_section_regression['CS MAE'] = cross_section_regression_model.resid.abs().mean()
+        cross_section_regression['CS Annualized MAE'] = cross_section_regression['CS MAE'] * annual_factor
+
+    return filter_columns_and_indexes(
+        cross_section_regression,
+        keep_columns=keep_columns,
+        drop_columns=drop_columns,
+        keep_indexes=keep_indexes,
+        drop_indexes=drop_indexes
+    )
+
 def calc_strategy_oos(
     y: Union[pd.Series, pd.DataFrame],
     X: Union[pd.Series, pd.DataFrame],
