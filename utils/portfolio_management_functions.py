@@ -6,7 +6,7 @@ import datetime
 pd.options.display.float_format = "{:,.4f}".format
 pd.set_option('display.width', 200)
 pd.set_option('display.max_columns', 30)
-from typing import Union, List
+from typing import Union, List, Callable
 from pandas import Timestamp
 
 import matplotlib.pyplot as plt
@@ -248,54 +248,7 @@ def calc_cummulative_returns(
         )
     if return_series == True or return_plot == False:
         return returns
-
-
-def calc_portfolio_returns(
-    returns: Union[pd.DataFrame, List[pd.Series]],
-    weights: Union[dict, list, pd.Series, pd.DataFrame],
-    port_name: Union[None, str] = None
-):
-    """
-    Creates a portfolio by applying the specified weights to the asset returns.
-
-    Parameters:
-    returns (pd.DataFrame or List of pd.Series): Time series of asset returns.
-    weights (list or pd.Series): Weights to apply to the returns. If a list or pd.Series is provided, it will be converted into a dict.
-    port_name (str or None, default=None): Name for the portfolio. If None, a name will be generated based on asset weights.
-
-    Returns:
-    pd.DataFrame: The portfolio returns based on the provided weights.
-    """
-
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
-    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
     
-    if isinstance(weights, list):
-        print("Weights are a list. Converting to dict assuming same order as columns in returns")
-        weights = dict(zip(returns.columns, weights))
-    elif isinstance(weights, pd.Series):
-        weights = weights.to_dict()
-    elif isinstance(weights, pd.DataFrame):
-        weights = list(weights.to_dict().values())[0]
-    elif isinstance(weights, dict):
-        pass
-    else:
-        raise Exception("Weights must be a dict, list, pd.Series, or pd.DataFrame")
-    
-    # Check returns size and weight size:
-    if returns.shape[1] != len(weights):
-        raise Exception(f"Returns have {returns.shape[1]} assets, but {len(weights)} weights were provided")
-
-    returns = returns[list(weights.keys())]
-    port_returns = pd.DataFrame(returns @ list(weights.values()))
-
-    if port_name is None:
-        print("Portfolio: "+" + ".join([f"{n} ({w:.2%})" for n, w in weights.items()]))
-        port_name = 'Portfolio'
-    port_returns.columns = [port_name]
-
-    return port_returns
-
 
 def calc_returns_statistics(
     returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
@@ -1370,15 +1323,144 @@ def calc_mv_port(
         return mv_weights
 
 
+def calc_portfolio_returns(
+    returns: Union[pd.DataFrame, List[pd.Series]],
+    weights: Union[dict, list, pd.Series, pd.DataFrame],
+    port_name: Union[None, str] = None
+):
+    """
+    Creates a portfolio by applying the specified weights to the asset returns.
+
+    Parameters:
+    returns (pd.DataFrame or List of pd.Series): Time series of asset returns.
+    weights (list or pd.Series): Weights to apply to the returns. If a list or pd.Series is provided, it will be converted into a dict.
+    port_name (str or None, default=None): Name for the portfolio. If None, a name will be generated based on asset weights.
+
+    Returns:
+    pd.DataFrame: The portfolio returns based on the provided weights.
+    """
+
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+    
+    if isinstance(weights, list):
+        print("Weights are a list. Converting to dict assuming same order as columns in returns")
+        weights = dict(zip(returns.columns, weights))
+    elif isinstance(weights, pd.Series):
+        weights = weights.to_dict()
+    elif isinstance(weights, pd.DataFrame):
+        weights = list(weights.to_dict().values())[0]
+    elif isinstance(weights, dict):
+        pass
+    else:
+        raise Exception("Weights must be a dict, list, pd.Series, or pd.DataFrame")
+    
+    # Check returns size and weight size:
+    if returns.shape[1] != len(weights):
+        raise Exception(f"Returns have {returns.shape[1]} assets, but {len(weights)} weights were provided")
+
+    returns = returns[list(weights.keys())]
+    port_returns = pd.DataFrame(returns @ list(weights.values()))
+
+    if port_name is None:
+        print("Portfolio: "+" + ".join([f"{n} ({w:.2%})" for n, w in weights.items()]))
+        port_name = 'Portfolio'
+    port_returns.columns = [port_name]
+
+    return port_returns
+
+
+def calc_port_oos_perf(
+    returns: Union[pd.DataFrame, List[pd.Series]],
+    weights_func: Callable,
+    weights_func_params: dict = {},
+    window_size: Union[None, int] = 60,
+    rolling: bool = False,
+    lag_periods: int = 1,
+    port_name: str = None,
+    keep_columns: Union[list, str] = None,
+    drop_columns: Union[list, str] = None,
+    keep_indexes: Union[list, str] = None,
+    drop_indexes: Union[list, str] = None
+):
+    
+    """
+    Calculates a rolling out-of-sample portfolio based on a rolling or expanding window optimization.
+    - Rebalancing works by fitting the weights in the in-sample window and applying them to the out-of-sample window. That is:
+        - Change the portfolio weights at the closing of the previous returns date, based on the in-sample window, 
+            which is the assets returns available up to (lag_period) days before the returns date - the start of that window
+            could be 0 (in case of expanding) or (window) days before that last considered day.
+            returns date: day_x
+            rebalancing date: day_x - 1
+            information filtration date: day_x - lagged_periods
+        
+        (if data is in months or weeks, then read the above in months or weeks)
+
+    Parameters:
+    returns (pd.DataFrame or List of pd.Series): Time series of asset returns.
+    weights_func (function): Function to calculate the portfolio weights.
+    weights_func_params (dict, default={}): Additional parameters for the weights function.
+    window_size (int or None, default=60): Size of the rolling window for in-sample fitting or the minimum number of observations for expanding window.
+    rolling (bool, default=rolling): If False, uses an expanding window instead of rolling.
+    port_name (str, default='Portfolio OOS'): Name for the portfolio.
+    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
+    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
+    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
+    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
+
+    Returns:
+    pd.DataFrame: Out-of-sample portfolio returns.
+    """
+
+    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+    
+
+    if window_size is None:
+        print('Using "window" of 60 periods, since none were provided.')
+        window_size = 60
+
+    port_returns_oos = pd.DataFrame({})
+
+    for idx in range(window_size, len(returns.index)-lag_periods+1, 1):
+
+        port_return_date = returns.index[idx+lag_periods-1]
+        idx_start = idx - window_size if rolling else 0
+        retuns_in_sample = returns.iloc[idx_start:idx].copy()
+        returns_out_sample = returns.loc[port_return_date, :].copy()
+
+        weights_func_all_params = {'returns': retuns_in_sample}
+        weights_func_all_params.update(weights_func_params)
+        
+        
+        wts = weights_func(**weights_func_all_params)
+        idx_port_return_oos = sum(returns_out_sample.loc[wts.index] * wts.iloc[:, 0])
+
+        if port_name is None:
+            port_name = wts.columns[0] + ' OOS'
+
+        idx_port_return_oos = pd.DataFrame({port_name: [idx_port_return_oos]}, index=[port_return_date])
+        port_returns_oos = pd.concat([port_returns_oos, idx_port_return_oos])
+
+    return filter_columns_and_indexes(
+        port_returns_oos,
+        keep_columns=keep_columns,
+        drop_columns=drop_columns,
+        keep_indexes=keep_indexes,
+        drop_indexes=drop_indexes
+    )
+
+
 def calc_regression(
-    y: Union[pd.DataFrame, pd.Series, List[pd.Series]],
-    x: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    Y: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    X: Union[pd.DataFrame, pd.Series, List[pd.Series]],
     intercept: bool = True,
     annual_factor: Union[None, int] = None,
     return_model: bool = False,
     return_fitted_values: bool = False,
     p_values: bool = True,
     tracking_error: bool = True,
+    r_squared: bool = True,
     treynor_info_ratio: bool = False,
     sortino_ratio: bool = False,
     timeframes: Union[None, dict] = None,
@@ -1389,7 +1471,7 @@ def calc_regression(
     ):
     
     """
-    Performs an OLS regression on the provided return data with optional intercept, timeframes, statistical ratios, and performance ratios.
+    Performs an OLS regression of a "many-to-many" returns time series with optional intercept, timeframes, statistical ratios, and performance ratios.
 
     Parameters:
     y (pd.DataFrame, pd.Series or List or pd.Series): Dependent variable(s) for the regression.
@@ -1400,6 +1482,7 @@ def calc_regression(
     return_fitted_values (bool, default=False): If True, returns the fitted values of the regression.
     p_values (bool, default=True): If True, displays p-values for the regression coefficients.
     tracking_error (bool, default=True): If True, calculates the tracking error of the regression.
+    r_squared (bool, default=True): If True, calculates the R-squared of the regression.
     treynor_info_ratios (bool, default=True): If True, calculates Treynor and Information ratios.
     sortino_ratio (bool, default=False): If True, calculates the Sortino ratio.
     timeframes (dict or None, default=None): Dictionary of timeframes to run separate regressions for each period.
@@ -1413,58 +1496,56 @@ def calc_regression(
     pd.DataFrame or model: Regression summary statistics or the model if `return_model` is True.
     """
 
-    x = returns_to_df(x) # Convert returns to DataFrame if it is a Series or a list of Series
-    fix_dates_index(x) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+    X = returns_to_df(X) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(X) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
-    y = returns_to_df(y) # Convert returns to DataFrame if it is a Series or a list of Series
-    fix_dates_index(y) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+    Y = returns_to_df(Y) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(Y) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     if annual_factor is None:
         print("Regression assumes 'annual_factor' equals to 12 since it was not provided")
         annual_factor = 12
+    
+    y_names = list(Y.columns) if isinstance(Y, pd.DataFrame) else [Y.name]
+    X_names = " + ".join(list(X.columns))
+    X_names = "Intercept + " + X_names if intercept else X_names
 
     # Add the intercept
     if intercept:
-        X = sm.add_constant(x)
-    else:
-        X = x
-    
-    y_names = list(y.columns) if isinstance(y, pd.DataFrame) else [y.name]
-    X_names = " + ".join(list(x.columns))
-    X_names = "Intercept + " + X_names if intercept else X_names
-
-
+        X = sm.add_constant(X)
+ 
     # Check if y and X have the same length
-    if len(X.index) != len(y.index):
-        print(f'y has lenght {len(y.index)} and X has lenght {len(X.index)}. Joining y and X by y.index...')
-        df = y.join(X, how='left')
+    if len(X.index) != len(Y.index):
+        print(f'y has lenght {len(Y.index)} and X has lenght {len(X.index)}. Joining y and X by y.index...')
+        df = Y.join(X, how='left')
         df = df.dropna()
-        y = df[y_names]
+        Y = df[y_names]
         X = df.drop(columns=y_names)
         if len(X.index) < len(X.columns) + 1:
             raise Exception('Indexes of y and X do not match and there are less observations than degrees of freedom. Cannot calculate regression')
+
 
     if isinstance(timeframes, dict):
         all_timeframes_regressions = pd.DataFrame()
         for name, timeframe in timeframes.items():
             if timeframe[0] and timeframe[1]:
-                timeframe_y = y.loc[timeframe[0]:timeframe[1]]
+                timeframe_Y = Y.loc[timeframe[0]:timeframe[1]]
                 timeframe_X = X.loc[timeframe[0]:timeframe[1]]
             elif timeframe[0]:
-                timeframe_y = y.loc[timeframe[0]:]
+                timeframe_Y = Y.loc[timeframe[0]:]
                 timeframe_X = X.loc[timeframe[0]:]
             elif timeframe[1]:
-                timeframe_y = y.loc[:timeframe[1]]
+                timeframe_Y = Y.loc[:timeframe[1]]
                 timeframe_X = X.loc[:timeframe[1]]
             else:
-                timeframe_y = y.copy()
+                timeframe_Y = Y.copy()
                 timeframe_X = X.copy()
-            if len(timeframe_y.index) == 0 or len(timeframe_X.index) == 0:
+            if len(timeframe_Y.index) == 0 or len(timeframe_X.index) == 0:
                 raise Exception(f'No returns data for {name} timeframe')
             
-            timeframe_y = timeframe_y.rename(columns=lambda col: col + f' ({name})')
+            timeframe_Y = timeframe_Y.rename(columns=lambda col: col + f' ({name})')
             timeframe_regression = calc_regression(
-                y=timeframe_y,
+                Y=timeframe_Y,
                 X=timeframe_X,
                 intercept=intercept,
                 annual_factor=annual_factor,
@@ -1488,16 +1569,16 @@ def calc_regression(
         return all_timeframes_regressions
     
     regression_statistics = pd.DataFrame(index=y_names, columns=[])	
-    fitted_values_all = pd.DataFrame(index=y.index, columns=y_names)
+    fitted_values_all = pd.DataFrame(index=Y.index, columns=y_names)
     for y_asset in y_names:
         # Fit the regression model: 
-        Y = y[y_asset] if isinstance(y, pd.DataFrame) else y
+        y = Y[y_asset]
         try:
-            ols_model = sm.OLS(Y, X, missing="drop")
+            ols_model = sm.OLS(y, X, missing="drop")
         except ValueError:
-            Y = Y.reset_index(drop=True)
+            y = y.reset_index(drop=True)
             X = X.reset_index(drop=True)
-            ols_model = sm.OLS(Y, X, missing="drop", hasconst=intercept)
+            ols_model = sm.OLS(y, X, missing="drop")
             print(f'"{y_asset}" Required to reset indexes to make regression work. Try passing "y" and "X" as pd.DataFrame')
         
         ols_results = ols_model.fit()
@@ -1520,10 +1601,10 @@ def calc_regression(
                 if p_values == True: 
                     regression_statistics.loc[y_asset, 'P-value (Alpha)'] = ols_results.pvalues.iloc[0] # Alpha p-value
 
-            regression_statistics.loc[y_asset, 'R-squared'] = ols_results.rsquared # R-squared
-
-            if isinstance(X, pd.Series):
-                X = pd.DataFrame(X)
+            if r_squared == True:
+                regression_statistics.loc[y_asset, 'R-squared'] = ols_results.rsquared # R-squared
+                if intercept == False:
+                    print('No intercept in regression. R-squared might not make statistical sense.')
             
             X_names = list(X.columns[1:]) if intercept else list(X.columns)
             betas = ols_results.params[1:] if intercept else ols_results.params
@@ -1535,7 +1616,7 @@ def calc_regression(
                     regression_statistics.loc[y_asset, f"P-Value ({X_names[i]})"] = betas_p_values.iloc[i] # Beta p-values
 
             if tracking_error == True:
-                regression_statistics.loc[y_asset, 'Tracking Error'] = ols_results.resid.std() * (annual_factor ** 0.5) # Annualized Residuals Volatility
+                regression_statistics.loc[y_asset, 'Tracking Error'] = ols_results.resid.std() 
                 regression_statistics.loc[y_asset, 'Annualized Tracking Error'] = regression_statistics.loc[y_asset, 'Tracking Error'] * (annual_factor ** 0.5) # Annualized Residuals Volatility
 
             if treynor_info_ratio == True:
@@ -1567,233 +1648,166 @@ def calc_regression(
         )
 
 
-def calc_strategy_oos(
+
+def calc_replication_oos_perf(
     y: Union[pd.Series, pd.DataFrame],
     X: Union[pd.Series, pd.DataFrame],
     intercept: bool = True,
-    rolling_size: Union[None, int] = 60,
-    expanding: bool = False,
-    lag_number: int = 1,
-    weight_multiplier: float = 100,
-    weight_min: Union[None, float] = None,
-    weight_max: Union[None, float] = None,
-    name: str = None,
-):
-    """
-    Calculates an out-of-sample strategy based on rolling or expanding window regression.
-
-    Parameters:
-    y (pd.Series or pd.DataFrame): Dependent variable (strategy returns).
-    X (pd.Series or pd.DataFrame): Independent variable(s) (predictors).
-    intercept (bool, default=True): If True, includes an intercept in the regression.
-    rolling_size (int or None, default=60): Size of the rolling window for in-sample fitting.
-    expanding (bool, default=False): If True, uses an expanding window instead of rolling.
-    lag_number (int, default=1): Number of lags to apply to the predictors.
-    weight_multiplier (float, default=100): Multiplier to adjust strategy weights.
-    weight_min (float or None, default=None): Minimum allowable weight.
-    weight_max (float or None, default=None): Maximum allowable weight.
-    name (str, default=None): Name for labeling the strategy returns.
-
-    Returns:
-    pd.DataFrame: Time series of strategy returns.
-    """
-    raise Exception("Function not available - needs testing prior to use")
-    try:
-        y = y.copy()
-        X = X.copy()
-    except:
-        pass
-    replication_oos = calc_replication_oos(
-        y=y,
-        X=X,
-        intercept=intercept,
-        rolling_size=rolling_size,
-        lag_number=lag_number,
-        expanding=expanding
-    )
-    actual_returns = replication_oos['Actual']
-    predicted_returns = replication_oos['Prediction']
-    strategy_weights = predicted_returns * weight_multiplier
-    weight_min = weight_min if weight_min is not None else strategy_weights.min()
-    weight_max = weight_max if weight_max is not None else strategy_weights.max()
-    strategy_weights = strategy_weights.clip(lower=weight_min, upper=weight_max)
-    strategy_returns = (actual_returns * strategy_weights).to_frame()
-    if name:
-        strategy_returns.columns = [name]
-    else:
-        strategy_returns.columns = [f'{y.columns[0]} Strategy']
-    return strategy_returns
-    
-
-def calc_iterative_regression(
-    multiple_y: Union[pd.DataFrame, pd.Series],
-    X: Union[pd.DataFrame, pd.Series],
-    annual_factor: Union[None, int] = 12,
-    intercept: bool = True,
-    warnings: bool = True,
-    calc_treynor_info_ratios: bool = True,
-    calc_sortino_ratio: bool = False,
+    window_size: Union[None, int] = None,
+    rolling: bool = True,
+    lag_periods: int = 1,
+    return_model_param: float = False,
+    annual_factor: Union[None, int] = None,
+    significance_level: float = 0.05,
     keep_columns: Union[list, str] = None,
     drop_columns: Union[list, str] = None,
     keep_indexes: Union[list, str] = None,
     drop_indexes: Union[list, str] = None
 ):
     """
-    Performs iterative regression across multiple dependent variables (assets).
-
-    Parameters:
-    multiple_y (pd.DataFrame or pd.Series): Dependent variables for multiple assets.
-    X (pd.DataFrame or pd.Series): Independent variable(s) (predictors).
-    annual_factor (int or None, default=12): Factor for annualizing regression statistics.
-    intercept (bool, default=True): If True, includes an intercept in the regression.
-    warnings (bool, default=True): If True, prints warnings about assumptions.
-    calc_treynor_info_ratios (bool, default=True): If True, calculates Treynor and Information ratios.
-    calc_sortino_ratio (bool, default=False): If True, calculates the Sortino ratio.
-    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
-    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
-    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
-    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
-
-    Returns:
-    pd.DataFrame: Summary statistics for each asset regression.
-    """
-    multiple_y = multiple_y.copy()
-    X = X.copy()
-
-    if 'date' in multiple_y.columns.str.lower():
-        multiple_y = multiple_y.rename({'Date': 'date'}, axis=1)
-        multiple_y = multiple_y.set_index('date')
-    multiple_y.index.name = 'date'
-
-    if 'date' in X.columns.str.lower():
-        X = X.rename({'Date': 'date'}, axis=1)
-        X = X.set_index('date')
-    X.index.name = 'date'
-
-    regressions = pd.DataFrame({})
-    for asset in multiple_y.columns:
-        y = multiple_y[[asset]]
-        new_regression = calc_regression(
-            y, X, annual_factor=annual_factor, intercept=intercept, warnings=warnings,
-            calc_treynor_info_ratios=calc_treynor_info_ratios,
-            calc_sortino_ratio=calc_sortino_ratio,
-        )
-        warnings = False
-        regressions = pd.concat([regressions, new_regression], axis=0)
-    
-    return filter_columns_and_indexes(
-        regressions,
-        keep_columns=keep_columns,
-        drop_columns=drop_columns,
-        keep_indexes=keep_indexes,
-        drop_indexes=drop_indexes
-    )
-
-
-def calc_replication_oos(
-    y: Union[pd.Series, pd.DataFrame],
-    X: Union[pd.Series, pd.DataFrame],
-    intercept: bool = True,
-    rolling_size: Union[None, int] = 60,
-    expanding: bool = False,
-    return_r_squared_oos: float = False,
-    lag_number: int = 1,
-    keep_columns: Union[list, str] = None,
-    drop_columns: Union[list, str] = None,
-    keep_indexes: Union[list, str] = None,
-    drop_indexes: Union[list, str] = None
-):
-    """
-    Performs out-of-sample replication of a time series regression with rolling or expanding windows.
+    Performs out-of-sample regression to replicate asset from other assets/factors
+        using returns time series with rolling windows (default) or expanding windows.
 
     Parameters:
     y (pd.Series or pd.DataFrame): Dependent variable (actual returns).
     X (pd.Series or pd.DataFrame): Independent variable(s) (predictors).
     intercept (bool, default=True): If True, includes an intercept in the regression.
-    rolling_size (int or None, default=60): Size of the rolling window for in-sample fitting.
-    expanding (bool, default=False): If True, uses an expanding window instead of rolling.
-    return_r_squared_oos (float, default=False): If True, returns the out-of-sample R-squared.
-    lag_number (int, default=1): Number of lags to apply to the predictors.
+    window_size (int or None, default=60): Size of the rolling window for in-sample fitting or the minimum number of observations for expanding window.
+    rolling (bool, default=rolling): If False, uses an expanding window instead of rolling.
+    lag_periods (int, default=1): Number of lags to apply to the predictors.
+    return_model_param (float, default=False): If True, returns the regression model statistics instead of predictions.
+    annual_factor (int or None, default=None): Factor for annualizing regression statistics.
+    significance_level (float, default=0.05): Level of significance (alpha) for evaluating parameters significance.
     keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
     drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
     keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
     drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
 
     Returns:
-    pd.DataFrame: Summary statistics for the out-of-sample replication.
+    pd.DataFrame: Predictions for the out-of-sample replication or the model parameters.
     """
-    try:
-        y = y.copy()
-        X = X.copy()
-    except:
-        pass
-    if isinstance(X, pd.Series):
-        X = pd.DataFrame(X)
-    if 'date' in X.columns.str.lower():
-        X = X.rename({'Date': 'date'}, axis=1)
-        X = X.set_index('date')
-    X.index.name = 'date'
 
-    X = X.shift(lag_number) # Lag the predictors
+    X = returns_to_df(X) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(X) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
-    df = y.join(X, how='inner')
-    y = df.iloc[:, [0]].copy()
-    X = df.iloc[:, 1:].copy()
+    y = returns_to_df(y) # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(y) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
+    if return_model_param == True and annual_factor is None:
+        print("Regression assumes 'annual_factor' equals to 12 since it was not provided")
+        annual_factor = 12
+    
+    if window_size is None:
+        print('Using "window" of 60 periods, since none were provided.')
+        window_size = 60
+
+    if y.shape[1] > 1:
+        raise ValueError('y must be a single column DataFrame or Series')
+
+    X = X.shift(lag_periods) # Lag the predictors
+
+    y_name = Y.columns[0]
+    X_names = " + ".join(list(X.columns))
+    X_names = "Intercept + " + X_names if intercept else X_names
+
+    # Add the intercept
     if intercept:
         X = sm.add_constant(X)
+ 
+    # Check if y and X have the same length
+    if len(X.index) != len(Y.index):
+        print(f'y has lenght {len(Y.index)} and X has lenght {len(X.index)}. Joining y and X by y.index...')
+        df = Y.join(X, how='left')
+        df = df.dropna()
+        Y = df[y_name]
+        X = df.drop(columns=y_name)
+        if len(X.index) < len(X.columns) + 1:
+            raise Exception('Indexes of y and X do not match and there are less observations than degrees of freedom. Cannot calculate regression')
+        
 
-    summary_pred = pd.DataFrame({})
+    summary_pred = pd.DataFrame({})	
+    
+    for idx in range(window_size, len(y.index)-lag_periods+1, 1):
+        prediction_date = y.index[idx+lag_periods-1]
+        
+        idx_start = idx - window_size if rolling else 0
+        y_in_sample = y.iloc[idx_start:idx].copy()
+        X_in_sample = X.iloc[idx_start:idx].copy()
 
-    for i, last_is_date in enumerate(y.index):
-        if i < (rolling_size):
-            continue
-        y_full = y.iloc[:i].copy()
-        if expanding:
-            y_rolling = y_full.copy()
+        X_out_sample = X.iloc[idx+lag_periods-1, :].copy()
+        y_out_sample = y.iloc[idx+lag_periods-1].copy()
+        
+        # Fit the regression model
+        try:
+            ols_model = sm.OLS(y_in_sample, X_in_sample, missing='drop')
+        except ValueError:
+            y = y.reset_index(drop=True)
+            X = X.reset_index(drop=True)
+            ols_model = sm.OLS(y, X, missing="drop")
+            print(f'"Reset indexes was required to make regression work. Try passing "y" and "X" as pd.DataFrame')
+        
+        ols_results = ols_model.fit()
+        
+        y_pred = ols_results.predict(X_out_sample)[0]
+        y_in_sample_mean = y_in_sample.mean().squeeze()
+        y_actual = y_out_sample.squeeze()
+        
+        summary_pred.loc[prediction_date,'Prediction'] = y_pred
+        summary_pred.loc[prediction_date,'Naive Prediction (Mean)'] = y_in_sample_mean
+        summary_pred.loc[prediction_date,'Actual'] = y_actual
+        
+        summary_pred.loc[prediction_date,'Prediction Error'] = summary_pred.loc[prediction_date,'Prediction'] - summary_pred.loc[prediction_date,'Actual']
+        summary_pred.loc[prediction_date,'Total Error'] = summary_pred.loc[prediction_date,'Naive Prediction (Mean)'] - summary_pred.loc[prediction_date,'Actual']
+
+
+    if return_model_param:
+        regression_statistics = pd.DataFrame(index=[y_name])
+
+        # Calculate/get statistics:
+        regression_params_names = []
+        if intercept == True:
+            regression_statistics.loc[y_name, 'Alpha'] = ols_results.params.iloc[0]
+            regression_statistics.loc[y_name, 'Annualized Alpha'] = ols_results.params.iloc[0] * annual_factor # Annualized Alpha
+            regression_statistics.loc[y_name, 'P-Value (Alpha)'] = ols_results.pvalues.iloc[0] # Alpha p-value
+            regression_params_names.append('Alpha')
         else:
-            y_rolling = y_full.iloc[-rolling_size:]
-        X_full = X.iloc[:i].copy()
-        if expanding:
-            X_rolling = X_full.copy()
+            print('No intercept in regression. OOS R-squared might not make statistical sense.')      
+        
+        X_names = list(X.columns[1:]) if intercept else list(X.columns)
+        betas = ols_results.params[1:] if intercept else ols_results.params
+        betas_p_values = ols_results.pvalues[1:] if intercept else ols_results.pvalues
+        
+        for idx in range(len(X_names)):
+            regression_statistics.loc[y_name, f"Beta ({X_names[idx]})"] = betas.iloc[idx] # Betas
+            regression_params_names.append(X_names[idx])
+        for idx in range(len(X_names)):
+            regression_statistics.loc[y_name, f"P-Value ({X_names[idx]})"] = betas_p_values.iloc[idx] # Beta p-values
+
+        rss = (np.array(summary_pred['Prediction Error']) ** 2).sum()
+        tss = (np.array(summary_pred['Total Error']) ** 2).sum()
+        oos_rsquared = 1 - rss / tss
+        tracking_error = np.sqrt(rss / len(summary_pred))
+
+        regression_statistics.loc[y_name, 'Tracking Error'] = tracking_error
+        regression_statistics.loc[y_name, 'Annualized Tracking Error'] = tracking_error * (annual_factor ** 0.5) # Annualized Residuals Volatility
+        regression_statistics.loc[y_name, 'OOS R-squared'] = oos_rsquared # R-squared
+        
+        regression_statistics_t = regression_statistics.T
+        print(regression_params_names)
+        print(regression_statistics_t)
+        significant_params = [param for param in regression_params_names if regression_statistics_t.loc[f'P-Value ({param})', y_name] < significance_level]
+
+        if len(significant_params) > 0:
+            print(f'Significant parameters at a confidence level of {(1-significance_level):.1%}: {", ".join(significant_params)}')
         else:
-            X_rolling = X_full.iloc[-rolling_size:]
-
-        reg = sm.OLS(y_rolling, X_rolling, hasconst=intercept, missing='drop').fit()
-        y_pred = reg.predict(X.iloc[i, :])
-        naive_y_pred = y_full.mean()
-        y_actual = y.iloc[i]
-        summary_line = (
-            reg.params
-            .to_frame()
-            .transpose()
-            .rename(columns=lambda c: c.replace('const', 'Alpha') if c == 'const' else c + ' Lag Beta')
+            print(f'No significant parameters at {(1-significance_level):.1%} level of confidence')
+        return filter_columns_and_indexes(
+            regression_statistics_t,
+            keep_columns=keep_columns,
+            drop_columns=drop_columns,
+            keep_indexes=keep_indexes,
+            drop_indexes=drop_indexes
         )
-        summary_line['Prediction'] = y_pred[0]
-        summary_line['Naive Prediction'] = naive_y_pred.squeeze()
-        summary_line['Actual'] = y_actual.squeeze()
-        summary_line.index = [y.index[i]]
-        summary_pred = pd.concat([summary_pred, summary_line], axis=0)
-
-    summary_pred['Prediction Error'] = summary_pred['Prediction'] - summary_pred['Actual']
-    summary_pred['Naive Prediction Error'] = summary_pred['Naive Prediction'] - summary_pred['Actual']
-
-    rss = (np.array(summary_pred['Prediction Error']) ** 2).sum()
-    tss = (np.array(summary_pred['Naive Prediction Error']) ** 2).sum()
-
-    oos_rsquared = 1 - rss / tss
-
-    if return_r_squared_oos:
-        return pd.DataFrame(
-            {'R^Squared OOS': oos_rsquared},
-            index=[
-                y.columns[0] + " ~ " + 
-                " + ".join([
-                    c.replace('const', 'Alpha') if c == 'const' else c + ' Lag Beta' for c in X.columns
-                ])]
-        )
-
-    print("OOS R^Squared: {:.4%}".format(oos_rsquared))
 
     return filter_columns_and_indexes(
         summary_pred,
@@ -1803,201 +1817,6 @@ def calc_replication_oos(
         drop_indexes=drop_indexes
     )
 
-
-def calc_replication_oos_not_lagged_features(
-    y: Union[pd.Series, pd.DataFrame],
-    X: Union[pd.Series, pd.DataFrame],
-    intercept: bool = True,
-    rolling_size: Union[None, int] = 60,
-    return_r_squared_oos: float = False,
-    r_squared_time_series: bool = False,
-    return_parameters: bool = True,
-    oos: int = 1,
-    keep_columns: Union[list, str] = None,
-    drop_columns: Union[list, str] = None,
-    keep_indexes: Union[list, str] = None,
-    drop_indexes: Union[list, str] = None
-):
-    """
-    Performs out-of-sample replication without lagged features.
-
-    Parameters:
-    y (pd.Series or pd.DataFrame): Dependent variable (actual returns).
-    X (pd.Series or pd.DataFrame): Independent variable(s) (predictors).
-    intercept (bool, default=True): If True, includes an intercept in the regression.
-    rolling_size (int or None, default=60): Size of the rolling window for in-sample fitting.
-    return_r_squared_oos (float, default=False): If True, returns the out-of-sample R-squared.
-    r_squared_time_series (bool, default=False): If True, calculates time-series R-squared.
-    return_parameters (bool, default=True): If True, returns regression parameters.
-    oos (int, default=1): Number of periods for out-of-sample evaluation.
-    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
-    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
-    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
-    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
-
-    Returns:
-    pd.DataFrame: Summary statistics for the out-of-sample replication.
-    """
-    raise Exception("Function not available - needs testing prior to use")
-    try:
-        y = y.copy()
-        X = X.copy()
-    except:
-        pass
-    if isinstance(X, pd.Series):
-        X = pd.DataFrame(X)
-    if 'date' in X.columns.str.lower():
-        X = X.rename({'Date': 'date'}, axis=1)
-        X = X.set_index('date')
-    X.index.name = 'date'
-
-    oos_print = "In-Sample" if oos == 0 else f"{oos}OS"
-
-    summary = defaultdict(list)
-
-    if isinstance(y, pd.Series):
-        y = pd.DataFrame(y)
-    y_name = y.columns[0]
-    
-    for idx in range(rolling_size, len(y.index)+1-oos, 1):
-        X_rolling = X.iloc[idx-rolling_size:idx].copy()
-        y_rolling = y.iloc[idx-rolling_size:idx, 0].copy()
-
-        y_oos = y.iloc[idx-1+oos, 0].copy()
-        X_oos = X.iloc[idx-1+oos, :].copy()
-
-        if intercept:
-            X_rolling = sm.add_constant(X_rolling)
-
-        try:
-            regr = sm.OLS(y_rolling, X_rolling, missing="drop", hasconst=intercept).fit()
-        except ValueError:
-            y_rolling = y_rolling.reset_index(drop=True)
-            X_rolling = X_rolling.reset_index(drop=True)
-            regr = sm.OLS(y_rolling, X_rolling, missing="drop", hasconst=intercept).fit()
-
-        for jdx, coeff in enumerate(regr.params.index):
-            if coeff != 'const':
-                summary[f"{coeff} Beta {oos_print}"].append(regr.params[jdx])
-            else:
-                summary[f"{coeff} {oos_print}"].append(regr.params[jdx])
-
-        if intercept:
-            y_pred = regr.params[0] + (regr.params[1:] @ X_oos)
-        else:
-            y_pred = regr.params @ X_oos
-
-        summary[f"{y_name} Replicated"].append(y_pred)
-        summary[f"{y_name} Actual"].append(y_oos)
-
-    summary = pd.DataFrame(summary, index=X.index[rolling_size-1+oos:])
-
-    if r_squared_time_series:
-        time_series_error = pd.DataFrame({})
-        for idx in range(rolling_size, len(y.index)+1-oos, 1):
-            y_rolling = y.iloc[idx-rolling_size:idx, 0].copy()
-            y_oos = y.iloc[idx-1+oos, 0].copy()
-            time_series_error.loc[y.index[idx-1+oos], 'Naive Error'] = y_oos - y_rolling.mean()
-        time_series_error['Model Error'] = summary[f"{y_name} Actual"] - summary[f"{y_name} Replicated"]
-        oos_rsquared = (
-            1 - time_series_error['Model Error'].apply(lambda x: x ** 2).sum()
-            / time_series_error['Naive Error'].apply(lambda x: x ** 2).sum()
-        )
-    else:
-        oos_rsquared = (
-            1 - (summary[f"{y_name} Actual"] - summary[f"{y_name} Replicated"]).var()
-            / summary[f"{y_name} Actual"].var()
-        )
-
-    if return_r_squared_oos:
-        return oos_rsquared
-    
-    if not return_parameters:
-        summary = summary[[f"{y_name} Actual", f"{y_name} Replicated"]]
-
-    if not intercept:
-        summary = summary.rename(columns=lambda c: c.replace(' Replicated', f' Replicated no Intercept'))
-
-    if not intercept:
-        print(f"R^Squared {oos_print} without Intercept: {oos_rsquared:.2%}")
-
-    else:
-        print(f"R^Squared {oos_print}: {oos_rsquared:.2%}")
-
-    summary = summary.rename(columns=lambda c: (
-        c.replace(' Replicated', f' Replicated {oos_print}').replace(' Actual', f' Actual {oos_print}')
-    ))
-
-    return filter_columns_and_indexes(
-        summary,
-        keep_columns=keep_columns,
-        drop_columns=drop_columns,
-        keep_indexes=keep_indexes,
-        drop_indexes=drop_indexes
-    )
-
-
-def calc_rolling_oos_port(
-    returns: pd.DataFrame,
-    weights_func,
-    window: Union[None, int] = None,
-    weights_func_params: dict = {},
-    port_name: str = 'Portfolio OOS',
-    expanding: bool = False,
-    keep_columns: Union[list, str] = None,
-    drop_columns: Union[list, str] = None,
-    keep_indexes: Union[list, str] = None,
-    drop_indexes: Union[list, str] = None
-):
-    """
-    Calculates a rolling out-of-sample portfolio based on a rolling or expanding window optimization.
-
-    Parameters:
-    returns (pd.DataFrame): Time series of asset returns.
-    weights_func (function): Function to calculate the portfolio weights.
-    window (int or None, default=None): Rolling window size for in-sample optimization.
-    weights_func_params (dict, default={}): Additional parameters for the weights function.
-    port_name (str, default='Portfolio OOS'): Name for the portfolio.
-    expanding (bool, default=False): If True, uses an expanding window instead of a rolling one.
-    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
-    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
-    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
-    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
-
-    Returns:
-    pd.DataFrame: Out-of-sample portfolio returns.
-    """
-    raise Exception("Function not available - needs testing prior to use")
-    if window is None:
-        print('Using "window" of 60 periods for in-sample optimization, since none were provided.')
-        window = 60
-    returns = returns.copy()
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
-
-    port_returns_oos = pd.DataFrame({})
-
-    for idx in range(0, len(returns.index)-window):
-        modified_idx = 0 if expanding else idx
-        weights_func_all_params = {'returns': returns.iloc[modified_idx:(window+idx), :]}
-        weights_func_all_params.update(weights_func_params)
-        wts = weights_func(**weights_func_all_params).iloc[:, 0]
-        idx_port_return_oos = sum(returns.iloc[window, :].loc[wts.index] * wts)
-        idx_port_return_oos = pd.DataFrame(
-            {port_name: idx_port_return_oos},
-            index=[returns.index[idx+window]]
-        )
-        port_returns_oos = pd.concat([port_returns_oos, idx_port_return_oos])
-
-    return filter_columns_and_indexes(
-        port_returns_oos,
-        keep_columns=keep_columns,
-        drop_columns=drop_columns,
-        keep_indexes=keep_indexes,
-        drop_indexes=drop_indexes
-    )
 
 
 def calc_fx_exc_ret(
