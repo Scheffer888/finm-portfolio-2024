@@ -7,19 +7,15 @@ pd.options.display.float_format = "{:,.4f}".format
 pd.set_option('display.width', 200)
 pd.set_option('display.max_columns', 30)
 from typing import Union, List, Callable
-from pandas import Timestamp
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 import statsmodels.api as sm
-from sklearn.linear_model import LinearRegression
 from scipy.optimize import minimize
 
 import warnings
 warnings.filterwarnings("ignore")
-
-from collections import defaultdict
 
 from scipy.stats import norm
 
@@ -164,24 +160,28 @@ def filter_columns_and_indexes(
 
     # Columns
     if keep_columns is not None:
-        keep_columns = "(?i)" + "|".join(keep_columns) if isinstance(keep_columns, list) else "(?i)" + keep_columns
+        keep_columns = [re.escape(col) for col in keep_columns]
+        keep_columns = "(?i).*(" + "|".join(keep_columns) + ").*" if isinstance(keep_columns, list) else "(?i).*" + keep_columns + ".*"
         df = df.filter(regex=keep_columns)
         if drop_columns is not None:
             print('Both "keep_columns" and "drop_columns" were specified. "drop_columns" will be ignored.')
 
     elif drop_columns is not None:
-        drop_columns = "(?i)" + "|".join(drop_columns) if isinstance(drop_columns, list) else "(?i)" + drop_columns
+        drop_columns = [re.escape(col) for col in drop_columns]
+        drop_columns = "(?i).*(" + "|".join(drop_columns) + ").*" if isinstance(drop_columns, list) else "(?i).*" + drop_columns + ".*"
         df = df.drop(columns=df.filter(regex=drop_columns).columns)
 
     # Indexes
     if keep_indexes is not None:
-        keep_indexes = "(?i)" + "|".join(keep_indexes) if isinstance(keep_indexes, list) else "(?i)" + keep_indexes
+        keep_indexes = [re.escape(col) for col in keep_indexes]
+        keep_indexes = "(?i).*(" + "|".join(keep_indexes) + ").*" if isinstance(keep_indexes, list) else "(?i).*" + keep_indexes + ".*"
         df = df.filter(regex=keep_indexes, axis=0)
         if drop_indexes is not None:
             print('Both "keep_indexes" and "drop_indexes" were specified. "drop_indexes" will be ignored.')
 
     elif drop_indexes is not None:
-        drop_indexes = "(?i)" + "|".join(drop_indexes) if isinstance(drop_indexes, list) else "(?i)" + drop_indexes
+        drop_indexes = [re.escape(col) for col in drop_indexes]
+        drop_indexes = "(?i).*(" + "|".join(drop_indexes) + ").*" if isinstance(drop_indexes, list) else "(?i).*" + drop_indexes + ".*"
         df = df.filter(regex=keep_indexes, axis=0)
     
     return df
@@ -257,8 +257,8 @@ def calc_returns_statistics(
     rf: Union[pd.Series, pd.DataFrame] = None,
     var_quantile: Union[float , List] = .05,
     timeframes: Union[None, dict] = None,
-    return_tangency_weights: bool = True,
-    correlations: Union[bool, List] = True,
+    return_tangency_weights: bool = False,
+    correlations: Union[bool, List] = False,
     tail_risks: bool = True,
     keep_columns: Union[list, str] = None,
     drop_columns: Union[list, str] = None,
@@ -306,11 +306,13 @@ def calc_returns_statistics(
         print('Assuming monthly returns with annualization term of 12')
         annual_factor = 12
 
+    
     if keep_columns is None:
         keep_columns = ['Accumulated Return', 'Annualized Mean', 'Annualized Vol', 'Annualized Sharpe', 'Min', 'Mean', 'Max']
         if tail_risks == True:
-            keep_columns += ['Skewness', 'Excess Kurtosis', 'Historical VaR (5.0%)', 'Historical CVaR (5.0%)', 'Max Drawdown', 
-                        'Peak Date', 'Bottom Date', 'Recovery', 'Duration (days)']
+            keep_columns += ['Skewness', 'Excess Kurtosis', f'Historical VaR ({var_quantile})', f'Annualized Historical VaR ({var_quantile})', 
+                             f'Historical CVaR ({var_quantile})', f'Annualized Historical CVaR ({var_quantile})', 'Max Drawdown', 
+                             'Peak Date', 'Bottom Date', 'Recovery', 'Duration (days)']
 
     # Iterate to calculate statistics for multiple timeframes
     if isinstance(timeframes, dict):
@@ -382,9 +384,9 @@ def calc_returns_statistics(
                                         var_quantile=var_quantile,
                                         keep_indexes=keep_indexes,
                                         drop_indexes=drop_indexes)
-
+        
         summary_statistics = summary_statistics.join(tail_risk_stats)
-    
+        
     if return_tangency_weights is True:
         tangency_weights = calc_tangency_port(returns)
         summary_statistics = summary_statistics.join(tangency_weights)
@@ -579,8 +581,8 @@ def calc_correlations(
     returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
     print_highest_lowest: bool = True,
     matrix_size: Union[int, float] = 7,
-    show_heatmap: bool = False,
-    return_matrix: bool = True,
+    show_heatmap: bool = True,
+    return_matrix: bool = False,
     keep_columns: Union[list, str] = None,
     drop_columns: Union[list, str] = None,
     keep_indexes: Union[list, str] = None,
@@ -1462,6 +1464,7 @@ def calc_regression(
     tracking_error: bool = True,
     r_squared: bool = True,
     treynor_info_ratio: bool = False,
+    market_name: str = 'SPY US Equity',
     sortino_ratio: bool = False,
     timeframes: Union[None, dict] = None,
     keep_columns: Union[list, str] = None,
@@ -1484,6 +1487,7 @@ def calc_regression(
     tracking_error (bool, default=True): If True, calculates the tracking error of the regression.
     r_squared (bool, default=True): If True, calculates the R-squared of the regression.
     treynor_info_ratios (bool, default=True): If True, calculates Treynor and Information ratios.
+    market_name (str, default='SPY US Equity'): Name of the market index for the Treynor ratio.
     sortino_ratio (bool, default=False): If True, calculates the Sortino ratio.
     timeframes (dict or None, default=None): Dictionary of timeframes to run separate regressions for each period.
     keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
@@ -1570,6 +1574,7 @@ def calc_regression(
     
     regression_statistics = pd.DataFrame(index=y_names, columns=[])	
     fitted_values_all = pd.DataFrame(index=Y.index, columns=y_names)
+
     for y_asset in y_names:
         # Fit the regression model: 
         y = Y[y_asset]
@@ -1590,22 +1595,32 @@ def calc_regression(
             fitted_values = ols_results.fittedvalues
             fitted_values = fitted_values.rename(f'{y_asset}^')
             fitted_values_all[y_asset] = fitted_values
-            return fitted_values_all
 
         else:
             # Calculate/get statistics:
-            if intercept == True:
-                regression_statistics.loc[y_asset, 'Alpha'] = ols_results.params.iloc[0]
-                regression_statistics.loc[y_asset, 'Annualized Alpha'] = ols_results.params.iloc[0] * annual_factor # Annualized Alpha
-
-                if p_values == True: 
-                    regression_statistics.loc[y_asset, 'P-value (Alpha)'] = ols_results.pvalues.iloc[0] # Alpha p-value
 
             if r_squared == True:
-                regression_statistics.loc[y_asset, 'R-squared'] = ols_results.rsquared # R-squared
+                regression_statistics.loc[y_asset, 'R-Squared'] = ols_results.rsquared # R-squared
                 if intercept == False:
-                    print('No intercept in regression. R-squared might not make statistical sense.')
-            
+                    print('No intercept in regression. R-Squared might not make statistical sense.')
+
+            regression_statistics.loc[y_asset, 'Observed Mean'] = y.mean()
+            regression_statistics.loc[y_asset, 'Observed Std Dev'] = y.std()
+
+            # Residual Standard Error (RSE) and Mean Absolute Error (MAE)
+            residuals =  ols_results.resid
+            regression_statistics.loc[y_asset, 'MAE'] = abs(residuals).mean()
+            rse = (sum(residuals**2) / (len(residuals) - len(ols_results.params))) ** 0.5 
+            regression_statistics.loc[y_asset, 'RSE'] = rse
+
+            if intercept == True:
+                regression_statistics.loc[y_asset, 'Alpha'] = ols_results.params.iloc[0]
+                regression_statistics.loc[y_asset, 'Annualized Alpha'] = ols_results.params.iloc[0] * annual_factor # Annualized Alpha 
+                
+                if p_values == True: 
+                    regression_statistics.loc[y_asset, 'P-Value (Alpha)'] = ols_results.pvalues.iloc[0] # Alpha p-value
+
+            # Process betas and p-values for explanatory variables
             X_names = list(X.columns[1:]) if intercept else list(X.columns)
             betas = ols_results.params[1:] if intercept else ols_results.params
             betas_p_values = ols_results.pvalues[1:] if intercept else ols_results.pvalues
@@ -1616,29 +1631,32 @@ def calc_regression(
                     regression_statistics.loc[y_asset, f"P-Value ({X_names[i]})"] = betas_p_values.iloc[i] # Beta p-values
 
             if tracking_error == True:
-                regression_statistics.loc[y_asset, 'Tracking Error'] = ols_results.resid.std() 
+                regression_statistics.loc[y_asset, 'Tracking Error'] = residuals.std() 
                 regression_statistics.loc[y_asset, 'Annualized Tracking Error'] = regression_statistics.loc[y_asset, 'Tracking Error'] * (annual_factor ** 0.5) # Annualized Residuals Volatility
 
             if treynor_info_ratio == True:
                 try:
-                    #Y_projected = ols_model.predict(X)
-                    regression_statistics[y_asset, 'Treynor Ratio'] = Y.mean() / regression_statistics.loc[y_asset, 'Beta (SPY US Equity)'] # Treynor Ratio
-                    regression_statistics[y_asset, 'Annualized Treynor Ratio'] = regression_statistics[y_asset, 'Treynor Ratio'] * annual_factor # Annualized Treynor Ratio
+                    treynor_ratio = y.mean() / regression_statistics.loc[y_asset, f'Beta ({market_name})']
+                    regression_statistics.loc[y_asset, 'Treynor Ratio'] = treynor_ratio # Treynor Ratio
+                    regression_statistics.loc[y_asset, 'Annualized Treynor Ratio'] = treynor_ratio * annual_factor # Annualized Treynor Ratio
                 except:
-                    print('SPY is not a factor in the regression. Treynor Ratio cannot be calculated.')
+                    print(f'{market_name} is not a factor in the regression. Treynor Ratio cannot be calculated.')
                 if intercept:
-                    regression_statistics.loc[y_asset, 'Information Ratio'] = regression_statistics.loc[y_asset, 'Alpha'] / ols_results.resid.std() # Information Ratio
+                    regression_statistics.loc[y_asset, 'Information Ratio'] = regression_statistics.loc[y_asset, 'Alpha'] / residuals.std() # Information Ratio
                     regression_statistics.loc[y_asset, 'Annualized Information Ratio'] = regression_statistics.loc[y_asset, 'Information Ratio'] * (annual_factor ** 0.5) # Annualized Information Ratio
             
-            regression_statistics.loc[y_asset, 'Fitted Mean'] = ols_results.fittedvalues.mean()
-            regression_statistics.loc[y_asset, 'Annualized Fitted Std Dev'] = regression_statistics.loc[y_asset, 'Fitted Mean'] * annual_factor
             if sortino_ratio:
                 try:
                     regression_statistics.loc[y_asset, 'Sortino Ratio'] = regression_statistics.loc[y_asset, 'Fitted Mean'] / Y[Y < 0].std()
                 except Exception as e:
                     print(f'Cannot calculate Sortino Ratio: {str(e)}. Set "calc_sortino_ratio" to False or review function')
     
+    if return_fitted_values:
+        return fitted_values_all
+    
     else:
+        if regression_statistics.shape[0] == 1:
+            regression_statistics = regression_statistics.T
         return filter_columns_and_indexes(
             regression_statistics,
             keep_columns=keep_columns,
@@ -1647,6 +1665,134 @@ def calc_regression(
             drop_indexes=drop_indexes
         )
 
+
+def calc_cross_section_regression(
+    Y: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    X: Union[pd.DataFrame, pd.Series, List[pd.Series]],
+    intercept: bool = True,
+    return_model: bool = False,
+    return_fitted_values: bool = False,
+    p_values: bool = True,
+    r_squared: bool = True,
+    regression_name: str = None,
+    keep_columns: Union[list, str] = None,
+    drop_columns: Union[list, str] = None,
+    keep_indexes: Union[list, str] = None,
+    drop_indexes: Union[list, str] = None
+):
+    """
+    Performs an OLS regression for cross-sectional data with optional intercept and statistical ratios.
+
+    Parameters:
+    Y (pd.DataFrame, pd.Series or List of pd.Series): Dependent variable(s) for the regression.
+    X (pd.DataFrame, pd.Series or List of pd.Series): Independent variable(s) for the regression.
+    intercept (bool, default=True): If True, includes an intercept in the regression.
+    return_model (bool, default=False): If True, returns the regression model object.
+    return_fitted_values (bool, default=False): If True, returns the fitted values of the regression.
+    p_values (bool, default=True): If True, displays p-values for the regression coefficients.
+    r_squared (bool, default=True): If True, calculates the R-squared of the regression.
+    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
+    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
+    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
+    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
+
+    Returns:
+    pd.DataFrame or model: Regression summary statistics or the model if `return_model` is True.
+    """
+
+    X = returns_to_df(X)  # Convert inputs to DataFrame if not already
+    Y = returns_to_df(Y)
+
+    y_names = list(Y.columns) if isinstance(Y, pd.DataFrame) else [Y.name]
+    X_names = " + ".join(list(X.columns))
+    X_names = "Intercept + " + X_names if intercept else X_names
+
+    # Add intercept if specified
+    if intercept:
+        X = sm.add_constant(X)
+
+    # Check alignment of Y and X
+    if len(X.index) != len(Y.index):
+        print(f'y has length {len(Y.index)} and X has length {len(X.index)}. Joining y and X by y.index...')
+        df = Y.join(X, how='left').dropna()
+        Y = df[y_names]
+        X = df.drop(columns=y_names)
+        if len(X.index) < len(X.columns) + 1:
+            raise Exception('Indexes of y and X do not match, and there are fewer observations than degrees of freedom.')
+
+    regression_statistics = pd.DataFrame(index=y_names, columns=[])
+    fitted_values_all = pd.DataFrame(index=Y.index, columns=y_names)
+
+    for y_asset in y_names:
+        # Fit the regression model
+        y = Y[y_asset]
+        try:
+            ols_model = sm.OLS(y, X, missing="drop")
+        except ValueError:
+            y = y.reset_index(drop=True)
+            X = X.reset_index(drop=True)
+            ols_model = sm.OLS(y, X, missing="drop")
+            print(f'"{y_asset}" Required to reset indexes to make regression work. Pass "y" and "X" as pd.DataFrame')
+
+        ols_results = ols_model.fit()
+
+        if return_model:
+            return ols_results
+
+        elif return_fitted_values:
+            fitted_values = ols_results.fittedvalues.rename(f'{y_asset}^')
+            fitted_values_all[y_asset] = fitted_values
+
+        else:
+            # Calculate/get statistics
+
+            if r_squared:
+                regression_statistics.loc[y_asset, 'R-Squared'] = ols_results.rsquared
+                if not intercept:
+                    print('No intercept in regression. R-Squared might not be interpretable.')
+            
+            # Mean and Standard Deviation of y
+            regression_statistics.loc[y_asset, 'Observed Mean'] = y.mean()
+            regression_statistics.loc[y_asset, 'Observed Std Dev'] = y.std()
+
+            # Residual Standard Error (RSE) and Mean Absolute Error (MAE)
+            residuals = ols_results.resid
+            regression_statistics.loc[y_asset, 'MAE'] = abs(residuals).mean()
+            rse = (sum(residuals**2) / (len(residuals) - len(ols_results.params))) ** 0.5 
+            regression_statistics.loc[y_asset, 'RSE'] = rse
+
+        
+            if intercept:
+                regression_statistics.loc[y_asset, 'Alpha'] = ols_results.params.iloc[0]
+                if p_values:
+                    regression_statistics.loc[y_asset, 'P-Value (Alpha)'] = ols_results.pvalues.iloc[0]
+
+            # Process betas and p-values for explanatory variables
+            X_names = list(X.columns[1:]) if intercept else list(X.columns)
+            betas = ols_results.params[1:] if intercept else ols_results.params
+            betas_p_values = ols_results.pvalues[1:] if intercept else ols_results.pvalues
+
+            for i, x_name in enumerate(X_names):
+                regression_statistics.loc[y_asset, f"Beta ({x_name})"] = betas.iloc[i]
+                if p_values:
+                    regression_statistics.loc[y_asset, f"P-Value ({x_name})"] = betas_p_values.iloc[i]
+
+    if return_fitted_values:
+        return fitted_values_all
+    
+    else:
+        regression_statistics_t = regression_statistics.T
+        if regression_statistics_t.columns[0] == 0:
+            if regression_name is None:
+                regression_name = 'Cross-Sectional'
+            regression_statistics_t.rename(columns={0: regression_name}, inplace=True)
+        return filter_columns_and_indexes(
+            regression_statistics_t,
+            keep_columns=keep_columns,
+            drop_columns=drop_columns,
+            keep_indexes=keep_indexes,
+            drop_indexes=drop_indexes
+        )
 
 
 def calc_replication_oos_perf(
@@ -1771,7 +1917,7 @@ def calc_replication_oos_perf(
             regression_statistics.loc[y_name, 'P-Value (Alpha)'] = ols_results.pvalues.iloc[0] # Alpha p-value
             regression_params_names.append('Alpha')
         else:
-            print('No intercept in regression. OOS R-squared might not make statistical sense.')      
+            print('No intercept in regression. OOS R-Squared might not make statistical sense.')      
         
         X_names = list(X.columns[1:]) if intercept else list(X.columns)
         betas = ols_results.params[1:] if intercept else ols_results.params
@@ -1779,9 +1925,8 @@ def calc_replication_oos_perf(
         
         for idx in range(len(X_names)):
             regression_statistics.loc[y_name, f"Beta ({X_names[idx]})"] = betas.iloc[idx] # Betas
-            regression_params_names.append(X_names[idx])
-        for idx in range(len(X_names)):
             regression_statistics.loc[y_name, f"P-Value ({X_names[idx]})"] = betas_p_values.iloc[idx] # Beta p-values
+            regression_params_names.append(X_names[idx])
 
         rss = (np.array(summary_pred['Prediction Error']) ** 2).sum()
         tss = (np.array(summary_pred['Total Error']) ** 2).sum()
@@ -1790,11 +1935,10 @@ def calc_replication_oos_perf(
 
         regression_statistics.loc[y_name, 'Tracking Error'] = tracking_error
         regression_statistics.loc[y_name, 'Annualized Tracking Error'] = tracking_error * (annual_factor ** 0.5) # Annualized Residuals Volatility
-        regression_statistics.loc[y_name, 'OOS R-squared'] = oos_rsquared # R-squared
+        regression_statistics.loc[y_name, 'OOS R-Squared'] = oos_rsquared # R-squared
         
         regression_statistics_t = regression_statistics.T
-        print(regression_params_names)
-        print(regression_statistics_t)
+
         significant_params = [param for param in regression_params_names if regression_statistics_t.loc[f'P-Value ({param})', y_name] < significance_level]
 
         if len(significant_params) > 0:
