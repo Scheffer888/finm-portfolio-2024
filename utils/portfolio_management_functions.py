@@ -239,13 +239,18 @@ def calc_cummulative_returns(
     returns = returns - 1
     title = f'Cummulative Returns {name}' if name else 'Cummulative Returns'
     if return_plot:
-        returns.plot(
+        returns_perc = returns * 100
+        ax = returns_perc.plot(
             title=title,
             figsize=(fig_size*1.5, fig_size),
             grid=True,
             xlabel='Date',
-            ylabel='Cummulative Returns'
+            ylabel='Cummulative Returns (%)'
         )
+
+        # Set the background color to light grey
+        ax.set_facecolor("lightgrey")
+
     if return_series == True or return_plot == False:
         return returns
     
@@ -309,10 +314,10 @@ def calc_returns_statistics(
     
     if keep_columns is None:
         keep_columns = ['Accumulated Return', 'Annualized Mean', 'Annualized Vol', 'Annualized Sharpe', 'Min', 'Mean', 'Max', 'Correlation']
-    if tail_risks == True:
-        keep_columns += ['Skewness', 'Excess Kurtosis', f'Historical VaR ({var_quantile})', f'Annualized Historical VaR ({var_quantile})', 
-                            f'Historical CVaR ({var_quantile})', f'Annualized Historical CVaR ({var_quantile})', 'Max Drawdown', 
-                            'Peak Date', 'Bottom Date', 'Recovery', 'Duration (days)']
+        if tail_risks == True:
+            keep_columns += ['Skewness', 'Excess Kurtosis', f'Historical VaR ({var_quantile})', f'Annualized Historical VaR ({var_quantile})', 
+                                f'Historical CVaR ({var_quantile})', f'Annualized Historical CVaR ({var_quantile})', 'Max Drawdown', 
+                                'Peak Date', 'Bottom Date', 'Recovery', 'Duration (days)']
     if return_tangency_weights == True:
         keep_columns += ['Tangency Portfolio']
     if correlations != False:
