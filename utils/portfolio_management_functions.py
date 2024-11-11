@@ -308,11 +308,15 @@ def calc_returns_statistics(
 
     
     if keep_columns is None:
-        keep_columns = ['Accumulated Return', 'Annualized Mean', 'Annualized Vol', 'Annualized Sharpe', 'Min', 'Mean', 'Max']
-        if tail_risks == True:
-            keep_columns += ['Skewness', 'Excess Kurtosis', f'Historical VaR ({var_quantile})', f'Annualized Historical VaR ({var_quantile})', 
-                             f'Historical CVaR ({var_quantile})', f'Annualized Historical CVaR ({var_quantile})', 'Max Drawdown', 
-                             'Peak Date', 'Bottom Date', 'Recovery', 'Duration (days)']
+        keep_columns = ['Accumulated Return', 'Annualized Mean', 'Annualized Vol', 'Annualized Sharpe', 'Min', 'Mean', 'Max', 'Correlation']
+    if tail_risks == True:
+        keep_columns += ['Skewness', 'Excess Kurtosis', f'Historical VaR ({var_quantile})', f'Annualized Historical VaR ({var_quantile})', 
+                            f'Historical CVaR ({var_quantile})', f'Annualized Historical CVaR ({var_quantile})', 'Max Drawdown', 
+                            'Peak Date', 'Bottom Date', 'Recovery', 'Duration (days)']
+    if return_tangency_weights == True:
+        keep_columns += ['Tangency Portfolio']
+    if correlations != False:
+        keep_columns += ['Correlation']
 
     # Iterate to calculate statistics for multiple timeframes
     if isinstance(timeframes, dict):
@@ -337,7 +341,9 @@ def calc_returns_statistics(
                 rf=rf,
                 var_quantile=var_quantile,
                 timeframes=None,
+                return_tangency_weights=return_tangency_weights,
                 correlations=correlations,
+                tail_risks=tail_risks,
                 _timeframe_name=name,
                 keep_columns=keep_columns,
                 drop_columns=drop_columns,
@@ -388,22 +394,27 @@ def calc_returns_statistics(
         summary_statistics = summary_statistics.join(tail_risk_stats)
         
     if return_tangency_weights is True:
-        tangency_weights = calc_tangency_port(returns)
+        tangency_weights = calc_tangency_port(returns, name = 'Tangency')
         summary_statistics = summary_statistics.join(tangency_weights)
 
     if correlations is True or isinstance(correlations, list):
+               
         returns_corr = returns.corr()
         if _timeframe_name:
-            returns_corr = returns_corr.rename(columns=lambda col: col.replace(f' {_timeframe_name}', ''))
-        returns_corr = returns_corr.rename(columns=lambda col: col + ' Correlation')
+            returns_corr = returns_corr.rename(columns=lambda col: col.replace(f' ({_timeframe_name})', ''))
+
         if isinstance(correlations, list):
-            correlation_names = [col + ' Correlation' for col  in correlations]
             # Check if all selected columns exist in returns_corr
-            not_in_returns_corr = [col for col in correlation_names if col not in returns_corr.columns]
-            if len(not_in_returns_corr) > 0:
-                not_in_returns_corr = ", ".join([c.replace(' Correlation', '') for c in not_in_returns_corr])
+            corr_not_in_returns_corr = [col for col in correlations if col not in returns_corr.columns]
+            if len(corr_not_in_returns_corr) > 0:
+                not_in_returns_corr = ", ".join([c for c in corr_not_in_returns_corr])
                 raise Exception(f'{not_in_returns_corr} not in returns columns')
-            returns_corr = returns_corr[[col + ' Correlation' for col  in correlations]]
+            
+            returns_corr = returns_corr[[col for col in correlations]]
+            
+        returns_corr = returns_corr.rename(columns=lambda col: col + ' Correlation')
+        
+        # Specify a suffix to be added to overlapping columns
         summary_statistics = summary_statistics.join(returns_corr)
     
     return filter_columns_and_indexes(
@@ -1463,7 +1474,9 @@ def calc_regression(
     p_values: bool = True,
     tracking_error: bool = True,
     r_squared: bool = True,
-    treynor_info_ratio: bool = False,
+    rse_mae: bool = True,
+    treynor_ratio: bool = False,
+    information_ratio: bool = False,
     market_name: str = 'SPY US Equity',
     sortino_ratio: bool = False,
     timeframes: Union[None, dict] = None,
@@ -1486,7 +1499,9 @@ def calc_regression(
     p_values (bool, default=True): If True, displays p-values for the regression coefficients.
     tracking_error (bool, default=True): If True, calculates the tracking error of the regression.
     r_squared (bool, default=True): If True, calculates the R-squared of the regression.
-    treynor_info_ratios (bool, default=True): If True, calculates Treynor and Information ratios.
+    rse_mae (bool, default=False): If True, calculates the Mean Absolute Error (MAE) and Relative Squared Error (RSE) of the regression.
+    treynor_ratio (bool, default=False): If True, calculates Treynor ratio.
+    information_ratio (bool, default=False): If True, calculates Information ratio.
     market_name (str, default='SPY US Equity'): Name of the market index for the Treynor ratio.
     sortino_ratio (bool, default=False): If True, calculates the Sortino ratio.
     timeframes (dict or None, default=None): Dictionary of timeframes to run separate regressions for each period.
@@ -1558,7 +1573,10 @@ def calc_regression(
                 return_fitted_values=False,
                 p_values=p_values,
                 tracking_error=tracking_error,
-                treynor_info_ratio=treynor_info_ratio,
+                r_squared=r_squared,
+                rse_mae=rse_mae,
+                treynor_ratio=treynor_ratio,
+                information_ratio=information_ratio,
                 timeframes=None,
                 keep_columns=keep_columns,
                 drop_columns=drop_columns,
@@ -1609,9 +1627,11 @@ def calc_regression(
 
             # Residual Standard Error (RSE) and Mean Absolute Error (MAE)
             residuals =  ols_results.resid
-            regression_statistics.loc[y_asset, 'MAE'] = abs(residuals).mean()
             rse = (sum(residuals**2) / (len(residuals) - len(ols_results.params))) ** 0.5 
-            regression_statistics.loc[y_asset, 'RSE'] = rse
+            
+            if rse_mae:
+                regression_statistics.loc[y_asset, 'RSE'] = rse
+                regression_statistics.loc[y_asset, 'MAE'] = abs(residuals).mean()
 
             if intercept == True:
                 regression_statistics.loc[y_asset, 'Alpha'] = ols_results.params.iloc[0]
@@ -1634,13 +1654,14 @@ def calc_regression(
                 regression_statistics.loc[y_asset, 'Tracking Error'] = residuals.std() 
                 regression_statistics.loc[y_asset, 'Annualized Tracking Error'] = regression_statistics.loc[y_asset, 'Tracking Error'] * (annual_factor ** 0.5) # Annualized Residuals Volatility
 
-            if treynor_info_ratio == True:
+            if treynor_ratio == True:
                 try:
                     treynor_ratio = y.mean() / regression_statistics.loc[y_asset, f'Beta ({market_name})']
                     regression_statistics.loc[y_asset, 'Treynor Ratio'] = treynor_ratio # Treynor Ratio
                     regression_statistics.loc[y_asset, 'Annualized Treynor Ratio'] = treynor_ratio * annual_factor # Annualized Treynor Ratio
                 except:
                     print(f'{market_name} is not a factor in the regression. Treynor Ratio cannot be calculated.')
+            if information_ratio == True:
                 if intercept:
                     regression_statistics.loc[y_asset, 'Information Ratio'] = regression_statistics.loc[y_asset, 'Alpha'] / residuals.std() # Information Ratio
                     regression_statistics.loc[y_asset, 'Annualized Information Ratio'] = regression_statistics.loc[y_asset, 'Information Ratio'] * (annual_factor ** 0.5) # Annualized Information Ratio
@@ -1674,6 +1695,7 @@ def calc_cross_section_regression(
     return_fitted_values: bool = False,
     p_values: bool = True,
     r_squared: bool = True,
+    rse_mae: bool = True,
     regression_name: str = None,
     keep_columns: Union[list, str] = None,
     drop_columns: Union[list, str] = None,
@@ -1691,6 +1713,7 @@ def calc_cross_section_regression(
     return_fitted_values (bool, default=False): If True, returns the fitted values of the regression.
     p_values (bool, default=True): If True, displays p-values for the regression coefficients.
     r_squared (bool, default=True): If True, calculates the R-squared of the regression.
+    rse_mae (bool, default=False): If True, calculates the Mean Absolute Error (MAE) and Relative Squared Error (RSE) of the regression.
     keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
     drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
     keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
@@ -1757,25 +1780,26 @@ def calc_cross_section_regression(
 
             # Residual Standard Error (RSE) and Mean Absolute Error (MAE)
             residuals = ols_results.resid
-            regression_statistics.loc[y_asset, 'MAE'] = abs(residuals).mean()
             rse = (sum(residuals**2) / (len(residuals) - len(ols_results.params))) ** 0.5 
-            regression_statistics.loc[y_asset, 'RSE'] = rse
 
-        
+            if rse_mae:
+                regression_statistics.loc[y_asset, 'MAE'] = abs(residuals).mean()
+                regression_statistics.loc[y_asset, 'RSE'] = rse
+
             if intercept:
-                regression_statistics.loc[y_asset, 'Alpha'] = ols_results.params.iloc[0]
+                regression_statistics.loc[y_asset, 'Intercept'] = ols_results.params.iloc[0]
                 if p_values:
-                    regression_statistics.loc[y_asset, 'P-Value (Alpha)'] = ols_results.pvalues.iloc[0]
+                    regression_statistics.loc[y_asset, 'P-Value (Intercept)'] = ols_results.pvalues.iloc[0]
 
-            # Process betas and p-values for explanatory variables
+            # Process lambda and p-values for explanatory variables
             X_names = list(X.columns[1:]) if intercept else list(X.columns)
-            betas = ols_results.params[1:] if intercept else ols_results.params
-            betas_p_values = ols_results.pvalues[1:] if intercept else ols_results.pvalues
+            lambdas = ols_results.params[1:] if intercept else ols_results.params
+            lambdas_p_values = ols_results.pvalues[1:] if intercept else ols_results.pvalues
 
             for i, x_name in enumerate(X_names):
-                regression_statistics.loc[y_asset, f"Beta ({x_name})"] = betas.iloc[i]
+                regression_statistics.loc[y_asset, f"Lambda ({x_name})"] = lambdas.iloc[i]
                 if p_values:
-                    regression_statistics.loc[y_asset, f"P-Value ({x_name})"] = betas_p_values.iloc[i]
+                    regression_statistics.loc[y_asset, f"P-Value ({x_name})"] = lambdas_p_values.iloc[i]
 
     if return_fitted_values:
         return fitted_values_all
