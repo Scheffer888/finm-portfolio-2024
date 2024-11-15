@@ -949,6 +949,7 @@ def plot_var(
 
 def calc_tangency_port(
     returns: Union[pd.DataFrame, List[pd.Series]],
+    expected_returns: Union[pd.Series, dict, None] = None,
     cov_matrix_factor: str = 1,
     target_return: Union[None, float] = None,
     annual_factor: int = 12,
@@ -963,6 +964,7 @@ def calc_tangency_port(
 
     Parameters:
     returns (pd.DataFrame or List of pd.Series): Time series of returns.
+    expected_returns (pd.Series, dict or None, default=None): Expected returns for each asset. If None, uses the mean returns as a proxy for expected returns.
     cov_matrix_factor (str, default=1): Weight for the covariance matrix. If 1, uses the sample covariance matrix, otherwise uses a shrinkage estimator.
     target_return (float or None, default=None): Target return for rescaling weights (annualized).
     annual_factor (int, default=12): Factor for annualizing returns.
@@ -987,7 +989,17 @@ def calc_tangency_port(
     
     cov_matrix_inv = np.linalg.pinv(cov_matrix)
     ones = np.ones(len(returns.columns))
-    mu = returns.mean() # Use mean monthly excess returns as a proxy for expected excess returns: (mu)
+    if expected_returns is not None:
+        if isinstance(expected_returns, dict):
+            expected_returns = pd.Series(expected_returns)
+        elif isinstance(expected_returns, pd.DataFrame):
+            expected_returns = expected_returns.iloc[:, 0]
+        else:
+            raise TypeError('expected_returns must be a pd.Series or a dictionary')
+        
+        mu = expected_returns.reindex(returns.columns).fillna(returns.mean())
+    else:
+        mu = returns.mean() # Use mean monthly excess returns as a proxy for expected excess returns: (mu)
 
     # Calculate the tangency portfolio weights
     scaling = 1 / (ones.T @ cov_matrix_inv @ mu)
@@ -1018,13 +1030,15 @@ def calc_tangency_port(
                 ha='center', va='center', xytext=(0, 10), textcoords='offset points')
 
     if cov_matrix_factor != 1:
-        tangency_wts = tangency_wts.rename({f'{name} Portfolio': f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
-        port_returns = port_returns.rename({f'{name} Portfolio':f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
-        tangency_wts = tangency_wts.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
-                                            f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
-        port_returns = port_returns.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
-                                            f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
-        
+        if target_return is None:
+            tangency_wts = tangency_wts.rename({f'{name} Portfolio': f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
+            port_returns = port_returns.rename({f'{name} Portfolio':f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
+        else:
+            tangency_wts = tangency_wts.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                                f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
+            port_returns = port_returns.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                                f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
+            
         
     if return_port_returns:
         return port_returns
@@ -1160,14 +1174,15 @@ def calc_risk_parity_port(
             {f'{name} Portfolio': f'{name} Portfolio (rescaled {target_return:.1%} p.a.)'},axis=1)
         
     if optimized == True:
-        port_returns = port_returns.rename({f'{name} Portfolio': f'{name} Portfolio (optimized)'}, axis = 1)
-        risk_parity_wts = risk_parity_wts.rename({f'{name} Portfolio': f'{name} Portfolio (optimized)'}, axis = 1)
-
-        port_returns = port_returns.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
-                                            f'{name} Portfolio (optimized, rescaled {target_return:.1%} p.a.)'}, axis = 1)
-        
-        risk_parity_wts = risk_parity_wts.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
-                                                  f'{name} Portfolio (optimized, rescaled {target_return:.1%} p.a.)'}, axis = 1)
+        if target_return is None:
+            port_returns = port_returns.rename({f'{name} Portfolio': f'{name} Portfolio (optimized)'}, axis = 1)
+            risk_parity_wts = risk_parity_wts.rename({f'{name} Portfolio': f'{name} Portfolio (optimized)'}, axis = 1)
+        else:
+            port_returns = port_returns.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                                f'{name} Portfolio (optimized, rescaled {target_return:.1%} p.a.)'}, axis = 1)
+            
+            risk_parity_wts = risk_parity_wts.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                                    f'{name} Portfolio (optimized, rescaled {target_return:.1%} p.a.)'}, axis = 1)
 
     # Plot the risk parity weights
     if show_graphic:
@@ -1248,13 +1263,14 @@ def calc_gmv_port(
                 ha='center', va='center', xytext=(0, 10), textcoords='offset points')
 
     if cov_matrix_factor != 1:
-        gmv_wts = gmv_wts.rename({f'{name} Portfolio': f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
-        port_returns = port_returns.rename({f'{name} Portfolio':f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
-        
-        gmv_wts = gmv_wts.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
-                                            f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
-        port_returns = port_returns.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
-                                            f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
+        if target_return is None:
+            gmv_wts = gmv_wts.rename({f'{name} Portfolio': f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
+            port_returns = port_returns.rename({f'{name} Portfolio':f'{name} Portfolio (regularized {cov_matrix_factor:.1f})'},axis=1)
+        else:
+            gmv_wts = gmv_wts.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                                f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
+            port_returns = port_returns.rename({f'{name} Portfolio (rescaled {target_return:.1%} p.a.)':
+                                                f'{name} Portfolio (regularized {cov_matrix_factor:.1f}, rescaled {target_return:.1%} p.a.)'},axis=1)
         
     if return_port_returns:
         return port_returns

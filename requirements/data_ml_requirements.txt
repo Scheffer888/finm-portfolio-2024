@@ -1,0 +1,13 @@
+
+
+accelerate
+joblib
+pandas
+numpy
+scipy
+statsmodels
+scikit-learn
+transformers
+nltk
+torch==2.5.1+cu124
+torchvision==0.20.1+cu124

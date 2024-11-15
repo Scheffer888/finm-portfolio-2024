@@ -1,4 +1,4 @@
-anyio==4.4.0
+yanyio==4.4.0
 appnope==0.1.4
 arch==7.0.0
 argon2-cffi==23.1.0
