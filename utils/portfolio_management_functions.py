@@ -6,7 +6,7 @@ import datetime
 pd.options.display.float_format = "{:,.4f}".format
 pd.set_option('display.width', 200)
 pd.set_option('display.max_columns', 30)
-from typing import Union, List, Callable
+from typing import Union, List, Callable, Dict
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -1715,12 +1715,11 @@ def calc_regression_rolling(
     X: Union[pd.DataFrame, pd.Series, List[pd.Series]],
     intercept: bool = True,
     window_size: int = 121,
+    betas_only: bool = True,
     annual_factor: Union[None, int] = None,
-    tracking_error: bool = True,
-    r_squared: bool = True,
-    rse_mae: bool = True,
-    p_values: bool = True,
-    timeframes: Union[None, dict] = None,
+    tracking_error: bool = None,
+    r_squared: bool = None,
+    rse_mae: bool = None,
     keep_columns: Union[list, str] = None,
     drop_columns: Union[list, str] = None,
     keep_indexes: Union[list, str] = None,
@@ -1734,13 +1733,12 @@ def calc_regression_rolling(
     X (pd.DataFrame, pd.Series or List of pd.Series): Independent variable(s) for the regression.
     intercept (bool, default=True): If True, includes an intercept in the regression.
     window_size (int, default=121): Size of the rolling window for in-sample fitting.
+
     annual_factor (int or None, default=None): Factor for annualizing regression statistics.
     return_model (bool, default=False): If True, returns the regression model object.
-    p_values (bool, default=True): If True, displays p-values for the regression coefficients.
     tracking_error (bool, default=True): If True, calculates the tracking error of the regression.
     r_squared (bool, default=True): If True, calculates the R-squared of the regression.
     rse_mae (bool, default=False): If True, calculates the Mean Absolute Error (MAE) and Relative Squared Error (RSE) of the regression.
-    timeframes (dict or None, default=None): Dictionary of timeframes to run separate regressions for each period.
     keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
     drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
     keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
@@ -1755,10 +1753,17 @@ def calc_regression_rolling(
     Y = returns_to_df(Y) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(Y) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
     
-    if annual_factor is None:
-        print("Regression assumes 'annual_factor' equals to 12 since it was not provided")
-        annual_factor = 12
+    if betas_only == True:
+        if r_squared == True or rse_mae == True or tracking_error == True:
+            print('Only betas are being calculated. Set "betas_only" to False to calculate other statistics.')
+    else:
+        if annual_factor is None:
+            print("Regression assumes 'annual_factor' equals to 12 since it was not provided")
+            annual_factor = 12
+        if r_squared == True and intercept == False:
+            print('No intercept in regression. R-Squared might not make statistical sense.')
     
+
     y_names = list(Y.columns) if isinstance(Y, pd.DataFrame) else [Y.name]
     X_names = " + ".join(list(X.columns))
     X_names = "Intercept + " + X_names if intercept else X_names
@@ -1779,6 +1784,9 @@ def calc_regression_rolling(
         
     regression_statistics = {}
 
+    X_names = list(X.columns[1:]) if intercept else list(X.columns)
+
+    # Loop through the rolling window
     for i in range(window_size, len(Y.index), 1):
 
         regression_statistics_i = pd.DataFrame(index=y_names, columns=[])	
@@ -1799,47 +1807,46 @@ def calc_regression_rolling(
             
             ols_results = ols_model.fit() 
 
-            if r_squared == True:
-                regression_statistics_i.loc[y_asset, 'R-Squared'] = ols_results.rsquared # R-squared
-                if intercept == False:
-                    print('No intercept in regression. R-Squared might not make statistical sense.')
+            if betas_only == True:
+                # Process betas for explanatory variables
+                betas = ols_results.params[1:] if intercept else ols_results.params
+                for j in range(len(X_names)):
+                    regression_statistics_i.loc[y_asset, f"{X_names[j]}"] = betas.iloc[j] # Betas
+            else:
+                if r_squared == True:
+                    regression_statistics_i.loc[y_asset, 'R-Squared'] = ols_results.rsquared # R-squared
 
-            # Residual Standard Error (RSE) and Mean Absolute Error (MAE)
-            residuals =  ols_results.resid
-            rse = (sum(residuals**2) / (len(residuals) - len(ols_results.params))) ** 0.5 
-            
-            if rse_mae:
-                regression_statistics_i.loc[y_asset, 'RSE'] = rse
-                regression_statistics_i.loc[y_asset, 'MAE'] = abs(residuals).mean()
-
-            if intercept == True:
-                regression_statistics_i.loc[y_asset, 'Alpha'] = ols_results.params.iloc[0]
-                regression_statistics_i.loc[y_asset, 'Annualized Alpha'] = ols_results.params.iloc[0] * annual_factor # Annualized Alpha 
+                # Residual Standard Error (RSE) and Mean Absolute Error (MAE)
+                residuals =  ols_results.resid
+                rse = (sum(residuals**2) / (len(residuals) - len(ols_results.params))) ** 0.5 
                 
-                if p_values == True: 
-                    regression_statistics_i.loc[y_asset, 'P-Value (Alpha)'] = ols_results.pvalues.iloc[0] # Alpha p-value
+                if rse_mae:
+                    regression_statistics_i.loc[y_asset, 'RSE'] = rse
+                    regression_statistics_i.loc[y_asset, 'MAE'] = abs(residuals).mean()
 
-            # Process betas and p-values for explanatory variables
-            X_names = list(X.columns[1:]) if intercept else list(X.columns)
-            betas = ols_results.params[1:] if intercept else ols_results.params
-            betas_p_values = ols_results.pvalues[1:] if intercept else ols_results.pvalues
+                if intercept == True:
+                    regression_statistics_i.loc[y_asset, 'Alpha'] = ols_results.params.iloc[0]
+                    regression_statistics_i.loc[y_asset, 'Annualized Alpha'] = ols_results.params.iloc[0] * annual_factor # Annualized Alpha 
+                    
+                # Process betas for explanatory variables
+                betas = ols_results.params[1:] if intercept else ols_results.params
+                
+                for j in range(len(X_names)):
+                    regression_statistics_i.loc[y_asset, f"Beta ({X_names[j]})"] = betas.iloc[j] # Betas
+
+                if tracking_error == True:
+                    regression_statistics_i.loc[y_asset, 'Tracking Error'] = residuals.std() 
+                    regression_statistics_i.loc[y_asset, 'Annualized Tracking Error'] = regression_statistics_i.loc[y_asset, 'Tracking Error'] * (annual_factor ** 0.5) # Annualized Residuals Volatility
+
+                regression_statistics_i =  filter_columns_and_indexes(regression_statistics,
+                                                                    keep_columns=keep_columns,
+                                                                    drop_columns=drop_columns,
+                                                                    keep_indexes=keep_indexes,
+                                                                    drop_indexes=drop_indexes)
             
-            for i in range(len(X_names)):
-                regression_statistics_i.loc[y_asset, f"Beta ({X_names[i]})"] = betas.iloc[i] # Betas
-                if p_values == True: 
-                    regression_statistics_i.loc[y_asset, f"P-Value ({X_names[i]})"] = betas_p_values.iloc[i] # Beta p-values
+        regression_statistics[Y.index[i]] = regression_statistics_i
 
-            if tracking_error == True:
-                regression_statistics_i.loc[y_asset, 'Tracking Error'] = residuals.std() 
-                regression_statistics_i.loc[y_asset, 'Annualized Tracking Error'] = regression_statistics_i.loc[y_asset, 'Tracking Error'] * (annual_factor ** 0.5) # Annualized Residuals Volatility
-
-            return filter_columns_and_indexes(
-                regression_statistics,
-                keep_columns=keep_columns,
-                drop_columns=drop_columns,
-                keep_indexes=keep_indexes,
-                drop_indexes=drop_indexes
-
+    return regression_statistics
 
 def calc_cross_section_regression(
     Y: Union[pd.DataFrame, pd.Series, List[pd.Series]],
@@ -1890,13 +1897,8 @@ def calc_cross_section_regression(
 
     # Check alignment of Y and X
     if len(X.index) != len(Y.index):
-        print(f'y has length {len(Y.index)} and X has length {len(X.index)}. Joining y and X by y.index...')
-        df = Y.join(X, how='left').dropna()
-        Y = df[y_names]
-        X = df.drop(columns=y_names)
-        if len(X.index) < len(X.columns) + 1:
-            raise Exception('Indexes of y and X do not match, and there are fewer observations than degrees of freedom.')
-
+        raise Exception(f'Y has length {len(Y.index)} and X has length {len(X.index)}. Y and X must have the same length.')
+    
     regression_statistics = pd.DataFrame(index=y_names, columns=[])
     fitted_values_all = pd.DataFrame(index=Y.index, columns=y_names)
 
@@ -1971,6 +1973,84 @@ def calc_cross_section_regression(
             keep_indexes=keep_indexes,
             drop_indexes=drop_indexes
         )
+
+def calc_cross_section_regression_rolling(
+    y: Union[pd.DataFrame, pd.Series],
+    X: Dict[datetime.datetime, Union[pd.DataFrame, pd.Series]],
+    intercept: bool = True,
+    regression_name: str = 'Rolling Cross-Section'
+):
+    """
+    Performs a rolling OLS regression many-to-one for cross-sectional data with optional intercept.
+
+    Parameters:
+    Y (pd.DataFrame, pd.Series or List of pd.Series): Single ependent variable for the regression.
+    X (dict): Dictionary of independent variable(s) for the regression, with dates as keys and DataFrames or Series as values containing the betas for each date.
+    intercept (bool, default=True): If True, includes an intercept in the regression.
+    return_model (bool, default=False): If True, returns the regression model object.
+    return_fitted_values (bool, default=False): If True, returns the fitted values of the regression.
+    p_values (bool, default=True): If True, displays p-values for the regression coefficients.
+    r_squared (bool, default=True): If True, calculates the R-squared of the regression.
+    rse_mae (bool, default=False): If True, calculates the Mean Absolute Error (MAE) and Relative Squared Error (RSE) of the regression.
+    keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
+    drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
+    keep_indexes (list or str, default=None): Indexes to keep in the resulting DataFrame.
+    drop_indexes (list or str, default=None): Indexes to drop from the resulting DataFrame.
+
+    Returns:
+    (pd.DataFrame, pd.DataFrame): time series of lambda coefficients and time series of residuals.
+    """
+
+    y = returns_to_df(y)  # Convert inputs to DataFrame if not already
+    
+    dates = list(X.keys())
+    factor_names =  X[next(iter(X))].columns
+    lambdas_series = pd.DataFrame(index=dates, columns=factor_names)
+    mean_absolute_error = pd.DataFrame(index=dates, columns=['MAE'])
+    if intercept == True:
+        intercept_series = pd.DataFrame(index=dates, columns=['Intercept'])
+    regression_summary = pd.DataFrame(index=['Rolling Cross-Section'])
+
+    for date, x in X.items():
+        y_i = y.loc[date]
+        X_i = x
+        cross_section_stats_i = calc_cross_section_regression(
+            Y=y_i,
+            X=X_i,
+            intercept=intercept,
+            return_model=False,
+            return_fitted_values=False,
+            p_values=False,
+            r_squared=False,
+            rse_mae=False
+        )
+
+        for factor in factor_names:
+            lambdas_series.loc[date, factor] = cross_section_stats_i.loc[f'Lambda ({factor})', :].values[0]
+
+        if intercept == True:
+            intercept_series.loc[date, 'Intercept'] = cross_section_stats_i.loc['Intercept', :].values[0]
+
+        mean_absolute_error_i = 0
+        for asset in y.columns:
+            mean_absolute_error_i += abs(
+                y_i[asset]
+                - sum(X_i.loc[asset, factor] * lambdas_series.loc[date, factor] for factor in lambdas_series.columns)
+                - (intercept_series.loc[date, 'Intercept'] if intercept else 0)
+            )
+        mean_absolute_error.loc[date, ] = mean_absolute_error_i
+
+    regression_summary.loc[regression_name, 'Intercept (mean)'] = intercept_series.mean().values[0]
+    regression_summary.loc[regression_name, 'Intercept (std dev)'] = intercept_series.std().values[0]
+    
+    for factor in lambdas_series.columns:
+        regression_summary.loc[regression_name, f'{factor} (mean)'] = lambdas_series[factor].mean()
+        regression_summary.loc[regression_name, f'{factor} (std dev)'] = lambdas_series[factor].std()
+
+    regression_summary.loc[regression_name, 'MAE (mean)'] = mean_absolute_error.mean().values[0]
+
+    return regression_summary.T
+        
 
 
 def calc_replication_oos_perf(
