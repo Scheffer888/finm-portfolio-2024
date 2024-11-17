@@ -6,7 +6,7 @@ import datetime
 pd.options.display.float_format = "{:,.4f}".format
 pd.set_option('display.width', 200)
 pd.set_option('display.max_columns', 30)
-from typing import Union, List, Callable, Dict
+from typing import Union, List, Callable
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -20,6 +20,9 @@ warnings.filterwarnings("ignore")
 from scipy.stats import norm
 
 import re
+
+from utils.tools import *
+
 
 def read_excel_default(excel_name: str, sheet_name: str = None, index_col : int = 0, parse_dates: bool =True, print_sheets: bool = False, **kwargs):
     """
@@ -259,7 +262,7 @@ def calc_returns_statistics(
     returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
     annual_factor: int = None,
     provided_excess_returns: bool = None,
-    rf: Union[pd.Series, pd.DataFrame] = None,
+    rf_returns: Union[pd.Series, pd.DataFrame] = None,
     var_quantile: Union[float , List] = .05,
     timeframes: Union[None, dict] = None,
     return_tangency_weights: bool = False,
@@ -296,15 +299,17 @@ def calc_returns_statistics(
     returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
-    if rf is not None:
-        rf = returns_to_df(rf) # Convert returns to DataFrame if it is a Series
-        fix_dates_index(rf) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
-        if len(rf.index) != len(returns.index):
-            raise Exception('"rf" index must be the same lenght as "returns"')
-        if type(rf) == pd.DataFrame:
-            rf = rf.iloc[:, 0].to_list()
-        elif type(rf) == pd.Series:
-            rf = rf.to_list()
+    if rf_returns is not None:
+        rf_returns = returns_to_df(rf_returns) # Convert returns to DataFrame if it is a Series
+        fix_dates_index(rf_returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+        rf_returns = rf_returns.reindex(returns.index).dropna()
+        
+        if len(rf_returns.index) != len(returns.index):
+            raise Exception('"rf_returns" has missing data to match "returns" index')
+        if type(rf_returns) == pd.DataFrame:
+            rf = rf_returns.iloc[:, 0].to_list()
+        elif type(rf_returns) == pd.Series:
+            rf = rf_returns.to_list()
 
     # Assume annualization factor of 12 for monthly returns if None and notify user
     if annual_factor is None:
@@ -343,7 +348,7 @@ def calc_returns_statistics(
                 returns=timeframe_returns,
                 annual_factor=annual_factor,
                 provided_excess_returns=provided_excess_returns,
-                rf=rf,
+                rf_returns=rf_returns,
                 var_quantile=var_quantile,
                 timeframes=None,
                 return_tangency_weights=return_tangency_weights,
@@ -1727,6 +1732,7 @@ def calc_regression_rolling(
     ):
     """
     Performs a multiple OLS regression of a "many-to-many" returns time series with optional intercept, timeframes, statistical ratios, and performance ratios on a rolling window.
+    This is the first stage of a Fama-MacBeth model, used to estimate the betas for every asset for every window.
 
     Parameters:
     Y (pd.DataFrame, pd.Series or List of pd.Series): Dependent variable(s) for the regression.
@@ -1978,15 +1984,18 @@ def calc_cross_section_regression_rolling(
     y: Union[pd.DataFrame, pd.Series],
     X: Dict[datetime.datetime, Union[pd.DataFrame, pd.Series]],
     intercept: bool = True,
+    annual_factor: Union[None, int] = None,
     regression_name: str = 'Rolling Cross-Section'
 ):
     """
     Performs a rolling OLS regression many-to-one for cross-sectional data with optional intercept.
+    This is the second stage of a Fama-MacBeth model, used to estimate the lambda coefficients for every factor for every window.
 
     Parameters:
     Y (pd.DataFrame, pd.Series or List of pd.Series): Single ependent variable for the regression.
     X (dict): Dictionary of independent variable(s) for the regression, with dates as keys and DataFrames or Series as values containing the betas for each date.
     intercept (bool, default=True): If True, includes an intercept in the regression.
+    annual_factor (int or None, default=None): Factor for annualizing regression statistics.
     return_model (bool, default=False): If True, returns the regression model object.
     return_fitted_values (bool, default=False): If True, returns the fitted values of the regression.
     p_values (bool, default=True): If True, displays p-values for the regression coefficients.
@@ -2003,12 +2012,21 @@ def calc_cross_section_regression_rolling(
 
     y = returns_to_df(y)  # Convert inputs to DataFrame if not already
     
+    if annual_factor is None:
+        print("Regression assumes 'annual_factor' equals to 252 since it was not provided")
+        annual_factor = 252
+        
     dates = list(X.keys())
     factor_names =  X[next(iter(X))].columns
     lambdas_series = pd.DataFrame(index=dates, columns=factor_names)
     mean_absolute_error = pd.DataFrame(index=dates, columns=['MAE'])
+
+    if len(dates) <= 1:
+        raise Exception('At least 2 dates are required to calculate rolling cross-section regression')
+    
     if intercept == True:
         intercept_series = pd.DataFrame(index=dates, columns=['Intercept'])
+
     regression_summary = pd.DataFrame(index=['Rolling Cross-Section'])
 
     for date, x in X.items():
@@ -2031,13 +2049,13 @@ def calc_cross_section_regression_rolling(
         if intercept == True:
             intercept_series.loc[date, 'Intercept'] = cross_section_stats_i.loc['Intercept', :].values[0]
 
-        mean_absolute_error_i = 0
+        total_abs_residuals = 0
         for asset in y.columns:
-            mean_absolute_error_i += abs(
-                y_i[asset]
-                - sum(X_i.loc[asset, factor] * lambdas_series.loc[date, factor] for factor in lambdas_series.columns)
-                - (intercept_series.loc[date, 'Intercept'] if intercept else 0)
-            )
+            residual = (y_i[asset]
+                       - sum(X_i.loc[asset, factor] * lambdas_series.loc[date, factor] for factor in lambdas_series.columns)
+                       - (intercept_series.loc[date, 'Intercept'] if intercept else 0))
+            total_abs_residuals += abs(residual)
+        mean_absolute_error_i = total_abs_residuals / len(y.columns)
         mean_absolute_error.loc[date, ] = mean_absolute_error_i
 
     regression_summary.loc[regression_name, 'Intercept (mean)'] = intercept_series.mean().values[0]
@@ -2046,6 +2064,27 @@ def calc_cross_section_regression_rolling(
     for factor in lambdas_series.columns:
         regression_summary.loc[regression_name, f'{factor} (mean)'] = lambdas_series[factor].mean()
         regression_summary.loc[regression_name, f'{factor} (std dev)'] = lambdas_series[factor].std()
+
+    regression_summary.loc[regression_name, 'MAE (mean)'] = mean_absolute_error.mean().values[0]
+
+    # Compute statistics directly from lambdas_series and intercept_series
+    for factor in lambdas_series.columns:
+        lambdas = lambdas_series[factor].dropna()
+        mean_lambda = lambdas.mean()
+        T = len(lambdas)
+        se_lambda = np.sqrt(np.sum((lambdas - mean_lambda)**2) / (T * (T - 1)))
+
+        regression_summary.loc[regression_name, f'{factor} (Annualized Mean)'] = mean_lambda * annual_factor
+        regression_summary.loc[regression_name, f'{factor} (Annualized SE)'] = se_lambda * annual_factor if T > 1 else None
+
+    if intercept:
+        intercepts = intercept_series['Intercept'].dropna()
+        mean_intercept = intercepts.mean()
+        T = len(intercepts)
+        se_intercept = np.sqrt(np.sum((intercepts - mean_intercept)**2) / (T * (T - 1)))
+        
+        regression_summary.loc[regression_name, 'Intercept (Annualized Mean)'] = mean_intercept * annual_factor
+        regression_summary.loc[regression_name, 'Intercept (Annualized SE)'] = se_intercept * annual_factor
 
     regression_summary.loc[regression_name, 'MAE (mean)'] = mean_absolute_error.mean().values[0]
 
