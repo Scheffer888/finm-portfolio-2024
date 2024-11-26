@@ -24,172 +24,6 @@ import re
 from utils.tools import *
 
 
-def read_excel_default(excel_name: str, sheet_name: str = None, index_col : int = 0, parse_dates: bool =True, print_sheets: bool = False, **kwargs):
-    """
-    Reads an Excel file and returns a DataFrame with specified options.
-
-    Parameters:
-    excel_name (str): The path to the Excel file.
-    index_col (int, default=0): Column to use as the row index labels of the DataFrame.
-    parse_dates (bool, default=True): Boolean to parse dates.
-    print_sheets (bool, default=False): If True, prints the names and first few rows of all sheets.
-    sheet_name (str or int, default=None): Name or index of the sheet to read. If None, reads the first sheet.
-    **kwargs: Additional arguments passed to `pd.read_excel`.
-
-    Returns:
-    pd.DataFrame: DataFrame containing the data from the specified Excel sheet.
-
-    Notes:
-    - If `print_sheets` is True, the function will print the names and first few rows of all sheets and return None.
-    - The function ensures that the index name is set to 'date' if the index column name is 'date' or 'dates', or if the index contains date-like values.
-    """
-    if print_sheets:
-        excel_file = pd.ExcelFile(excel_name)  # Load the Excel file to get sheet names
-        sheet_names = excel_file.sheet_names
-        n = 0
-        while True:
-            try:
-                sheet = pd.read_excel(excel_name, sheet_name=n)
-                print(f'Sheet name: {sheet_names[n]}')
-                print("Columns: " + ", ".join(list(sheet.columns)))
-                print(sheet.head(3))
-                n += 1
-                print('-' * 70)
-                print('\n')
-            except:
-                return
-    sheet_name = 0 if sheet_name is None else sheet_name
-    data = pd.read_excel(excel_name, index_col=index_col, parse_dates=parse_dates,  sheet_name=sheet_name, **kwargs)
-    if data.index.name is not None:
-        if data.index.name.lower() in ['date', 'dates']:
-            data.index.name = 'date'
-    elif isinstance(data.index[0], (datetime.date, datetime.datetime)):
-        data.index.name = 'date'
-    return data
-
-
-def returns_to_df(returns: Union[pd.DataFrame, pd.Series, List[pd.Series]], name: str = "Returns"):
-    """
-    Converts returns to a DataFrame if it is a Series or a list of Series.
-
-    Parameters:
-    returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
-
-    Returns:
-    pd.DataFrame: DataFrame of returns.
-    """
-    if isinstance(returns, pd.DataFrame):
-        returns = returns.copy()
-    if isinstance(returns, pd.Series):
-        returns = returns.to_frame()
-    elif isinstance(returns, list):
-        returns_list = returns.copy()
-        returns = pd.DataFrame({})
-
-        for series in returns_list:
-            if isinstance(series, pd.Series):
-                returns = returns.merge(series, right_index=True, left_index=True, how='outer')
-            else:
-                raise TypeError(f'{name} must be either a pd.DataFrame or a list of pd.Series')
-            
-    # Convert returns to float
-    try:
-        returns = returns.apply(lambda x: x.astype(float))
-    except ValueError:
-        print(f'Could not convert {name} to float. Check if there are any non-numeric values')
-        pass
-
-    return returns
-
-
-def fix_dates_index(returns: pd.DataFrame):
-    """
-    Fixes the date index of a DataFrame if it is not in datetime format and convert returns to float.
-
-    Parameters:
-    returns (pd.DataFrame): DataFrame of returns.
-
-    Returns:
-    pd.DataFrame: DataFrame with datetime index.
-    """
-    # Check if 'date' is in the columns and set it as the index
-
-    if 'date' in returns.columns.str.lower():
-        returns = returns.rename({'Date': 'date'}, axis=1)
-        returns = returns.set_index('date')
-    returns.index.name = 'date'
-
-    # Convert dates to datetime
-    try:
-        returns.index = pd.to_datetime(returns.index.map(lambda x: x.date()))
-    except ValueError:
-        print('Could not convert the index to datetime. Check the index format for invalid dates.')
-    
-    # Convert returns to float
-    try:
-        returns = returns.apply(lambda x: x.astype(float))
-    except ValueError:
-        print('Could not convert returns to float. Check if there are any non-numeric values')
-        pass
-
-    return returns
-
-
-def filter_columns_and_indexes(
-    df: pd.DataFrame,
-    keep_columns: Union[list, str],
-    drop_columns: Union[list, str],
-    keep_indexes: Union[list, str],
-    drop_indexes: Union[list, str]
-):
-    """
-    Filters a DataFrame based on specified columns and indexes.
-
-    Parameters:
-    df (pd.DataFrame): DataFrame to be filtered.
-    keep_columns (list or str): Columns to keep in the DataFrame.
-    drop_columns (list or str): Columns to drop from the DataFrame.
-    keep_indexes (list or str): Indexes to keep in the DataFrame.
-    drop_indexes (list or str): Indexes to drop from the DataFrame.
-
-    Returns:
-    pd.DataFrame: The filtered DataFrame.
-    """
-
-    if not isinstance(df, (pd.DataFrame, pd.Series)):
-        return df
-    
-    df = df.copy()
-
-    # Columns
-    if keep_columns is not None:
-        keep_columns = [re.escape(col) for col in keep_columns]
-        keep_columns = "(?i).*(" + "|".join(keep_columns) + ").*" if isinstance(keep_columns, list) else "(?i).*" + keep_columns + ".*"
-        df = df.filter(regex=keep_columns)
-        if drop_columns is not None:
-            print('Both "keep_columns" and "drop_columns" were specified. "drop_columns" will be ignored.')
-
-    elif drop_columns is not None:
-        drop_columns = [re.escape(col) for col in drop_columns]
-        drop_columns = "(?i).*(" + "|".join(drop_columns) + ").*" if isinstance(drop_columns, list) else "(?i).*" + drop_columns + ".*"
-        df = df.drop(columns=df.filter(regex=drop_columns).columns)
-
-    # Indexes
-    if keep_indexes is not None:
-        keep_indexes = [re.escape(col) for col in keep_indexes]
-        keep_indexes = "(?i).*(" + "|".join(keep_indexes) + ").*" if isinstance(keep_indexes, list) else "(?i).*" + keep_indexes + ".*"
-        df = df.filter(regex=keep_indexes, axis=0)
-        if drop_indexes is not None:
-            print('Both "keep_indexes" and "drop_indexes" were specified. "drop_indexes" will be ignored.')
-
-    elif drop_indexes is not None:
-        drop_indexes = [re.escape(col) for col in drop_indexes]
-        drop_indexes = "(?i).*(" + "|".join(drop_indexes) + ").*" if isinstance(drop_indexes, list) else "(?i).*" + drop_indexes + ".*"
-        df = df.filter(regex=keep_indexes, axis=0)
-    
-    return df
-
-
 def calc_cummulative_returns(
     returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
     return_plot: bool = True,
@@ -213,7 +47,7 @@ def calc_cummulative_returns(
     pd.DataFrame or None: Returns cumulative returns DataFrame if `return_series` is True.
     """
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     if timeframes is not None:
@@ -296,11 +130,11 @@ def calc_returns_statistics(
     pd.DataFrame: Summary statistics of the returns.
     """
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     if rf_returns is not None:
-        rf_returns = returns_to_df(rf_returns) # Convert returns to DataFrame if it is a Series
+        rf_returns = time_series_to_df(rf_returns) # Convert returns to DataFrame if it is a Series
         fix_dates_index(rf_returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
         rf_returns = rf_returns.reindex(returns.index).dropna()
         
@@ -374,7 +208,7 @@ def calc_returns_statistics(
     summary_statistics['Annualized Vol'] = returns.std() * np.sqrt(annual_factor)
 
     if provided_excess_returns is True:
-        if rf is not None:
+        if rf_returns is not None:
             print('Excess returns and risk-free were both provided.'
                 ' Excess returns will be consider as is, and risk-free rate given will be ignored.\n')
         summary_statistics['Sharpe'] = returns.mean() / returns.std()
@@ -393,6 +227,8 @@ def calc_returns_statistics(
     summary_statistics['Annualized Sharpe'] = summary_statistics['Sharpe'] * np.sqrt(annual_factor)
     summary_statistics['Min'] = returns.min()
     summary_statistics['Max'] = returns.max()
+
+    summary_statistics['Win Rate'] = (returns > 0).mean()
     
     if tail_risks == True:
         tail_risk_stats = stats_tail_risk(returns,
@@ -461,7 +297,7 @@ def stats_tail_risk(
     pd.DataFrame: tail risk summary statistics of the returns.
     """
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     tail_risk_stats = pd.DataFrame(index=returns.columns)
@@ -529,7 +365,7 @@ def calc_neg_pos_pct(
     pd.DataFrame: A DataFrame with the percentage of negative or positive returns, number of returns, and the count of negative/positive returns.
     """
     
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     prev_len_index = returns.apply(lambda x: len(x))
@@ -626,7 +462,7 @@ def calc_correlations(
     sns.heatmap or pd.DataFrame: Heatmap of the correlation matrix or the correlation matrix itself.
     """
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     returns = filter_columns_and_indexes(
@@ -863,10 +699,10 @@ def plot_var(
     is_excess_returns (bool, default=False): If True, adjust y-axis label accordingly.
 
     """
-    var = returns_to_df(var, "VaR") # Convert returns to DataFrame if it is a Series or a list of Series
+    var = time_series_to_df(var, "VaR") # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(var) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
-    returns = returns_to_df(returns, "Returns")
+    returns = time_series_to_df(returns, "Returns")
     fix_dates_index(returns)
     returns = pd.merge(returns, var, left_index=True, right_index=True).dropna()
     
@@ -981,7 +817,7 @@ def calc_tangency_port(
     pd.DataFrame or pd.Series: Tangency portfolio weights or portfolio returns if `return_port_ret` is True.
     """
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     # Calculate the covariance matrix
@@ -1076,7 +912,7 @@ def calc_equal_weights_port(
     pd.DataFrame or pd.Series: Equal portfolio weights or portfolio returns if `return_port_returns` is True.
     """
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     equal_wts = pd.DataFrame(
@@ -1145,7 +981,7 @@ def calc_risk_parity_port(
         target_risk = np.mean(risk_contributions)
         return np.sum((risk_contributions - target_risk) ** 2)
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     # Calculaye weights for risk parity
@@ -1228,7 +1064,7 @@ def calc_gmv_port(
     Returns:
     pd.DataFrame or pd.Series: GMV portfolio weights or portfolio returns if `return_port_ret` is True.
     """
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     # Calculate the covariance matrix
@@ -1312,7 +1148,7 @@ def calc_mv_port(
     pd.DataFrame: Weights of the Tangency and GMV portfolios, along with the combined target return portfolio.
     """
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
     
     if not isinstance(target_return, (float, int)):
@@ -1365,13 +1201,13 @@ def calc_mv_port(
         return mv_weights
 
 
-def calc_portfolio_returns(
+def calc_const_port_returns(
     returns: Union[pd.DataFrame, List[pd.Series]],
     weights: Union[dict, list, pd.Series, pd.DataFrame],
     port_name: Union[None, str] = None
 ):
     """
-    Creates a portfolio by applying the specified weights to the asset returns.
+    Creates a portfolio by applying the specified constant weights to the asset returns.
 
     Parameters:
     returns (pd.DataFrame or List of pd.Series): Time series of asset returns.
@@ -1382,7 +1218,7 @@ def calc_portfolio_returns(
     pd.DataFrame: The portfolio returns based on the provided weights.
     """
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
     
     if isinstance(weights, list):
@@ -1401,6 +1237,7 @@ def calc_portfolio_returns(
     if returns.shape[1] != len(weights):
         raise Exception(f"Returns have {returns.shape[1]} assets, but {len(weights)} weights were provided")
 
+    # Ensure columns match weights keys
     returns = returns[list(weights.keys())]
     port_returns = pd.DataFrame(returns @ list(weights.values()))
 
@@ -1454,7 +1291,7 @@ def calc_port_oos_perf(
     pd.DataFrame: Out-of-sample portfolio returns.
     """
 
-    returns = returns_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
+    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
     
 
@@ -1544,10 +1381,10 @@ def calc_regression(
     pd.DataFrame or model: Regression summary statistics or the model if `return_model` is True.
     """
 
-    X = returns_to_df(X) # Convert returns to DataFrame if it is a Series or a list of Series
+    X = time_series_to_df(X) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(X) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
-    Y = returns_to_df(Y) # Convert returns to DataFrame if it is a Series or a list of Series
+    Y = time_series_to_df(Y) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(Y) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     if annual_factor is None:
@@ -1753,10 +1590,10 @@ def calc_regression_rolling(
     Returns: a dataframe with the regression statistics for each rolling window.
     """
     
-    X = returns_to_df(X) # Convert returns to DataFrame if it is a Series or a list of Series
+    X = time_series_to_df(X) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(X) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
-    Y = returns_to_df(Y) # Convert returns to DataFrame if it is a Series or a list of Series
+    Y = time_series_to_df(Y) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(Y) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
     
     if betas_only == True:
@@ -1890,8 +1727,8 @@ def calc_cross_section_regression(
     pd.DataFrame or model: Regression summary statistics or the model if `return_model` is True.
     """
 
-    X = returns_to_df(X)  # Convert inputs to DataFrame if not already
-    Y = returns_to_df(Y)
+    X = time_series_to_df(X)  # Convert inputs to DataFrame if not already
+    Y = time_series_to_df(Y)
 
     y_names = list(Y.columns) if isinstance(Y, pd.DataFrame) else [Y.name]
     X_names = " + ".join(list(X.columns))
@@ -2010,7 +1847,7 @@ def calc_cross_section_regression_rolling(
     (pd.DataFrame, pd.DataFrame): time series of lambda coefficients and time series of residuals.
     """
 
-    y = returns_to_df(y)  # Convert inputs to DataFrame if not already
+    y = time_series_to_df(y)  # Convert inputs to DataFrame if not already
     
     if annual_factor is None:
         print("Regression assumes 'annual_factor' equals to 252 since it was not provided")
@@ -2130,10 +1967,10 @@ def calc_replication_oos_perf(
     pd.DataFrame: Predictions for the out-of-sample replication or the model parameters.
     """
 
-    X = returns_to_df(X) # Convert returns to DataFrame if it is a Series or a list of Series
+    X = time_series_to_df(X) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(X) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
-    y = returns_to_df(y) # Convert returns to DataFrame if it is a Series or a list of Series
+    y = time_series_to_df(y) # Convert returns to DataFrame if it is a Series or a list of Series
     fix_dates_index(y) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     if return_model_param == True and annual_factor is None:

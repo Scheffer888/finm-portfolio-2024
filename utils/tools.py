@@ -5,7 +5,7 @@ pd.options.display.float_format = "{:,.4f}".format
 pd.set_option('display.width', 200)
 pd.set_option('display.max_columns', 30)
 
-from typing import Union, List
+from typing import Union, List, Dict
 
 import re
 
@@ -27,8 +27,9 @@ def read_excel_default(excel_name: str, sheet_name: str = None, index_col : int 
 
     Notes:
     - If `print_sheets` is True, the function will print the names and first few rows of all sheets and return None.
-    - The function ensures that the index name is set to 'date' if the index column name is 'date' or 'dates', or if the index contains date-like values.
+    - The function ensures that the index name is set to 'date' if the index column name is 'date', 'dates' or 'datatime', or if the index contains date-like values.
     """
+
     if print_sheets:
         excel_file = pd.ExcelFile(excel_name)  # Load the Excel file to get sheet names
         sheet_names = excel_file.sheet_names
@@ -47,14 +48,49 @@ def read_excel_default(excel_name: str, sheet_name: str = None, index_col : int 
     sheet_name = 0 if sheet_name is None else sheet_name
     data = pd.read_excel(excel_name, index_col=index_col, parse_dates=parse_dates,  sheet_name=sheet_name, **kwargs)
     if data.index.name is not None:
-        if data.index.name.lower() in ['date', 'dates']:
+        if data.index.name.lower() in ['date', 'dates', 'datetime']:
             data.index.name = 'date'
     elif isinstance(data.index[0], (datetime.date, datetime.datetime)):
         data.index.name = 'date'
     return data
 
 
-def returns_to_df(returns: Union[pd.DataFrame, pd.Series, List[pd.Series]], name: str = "Returns"):
+def read_csv_default(csv_name: str, index_col: int = 0, parse_dates: bool = True, print_data: bool = False, **kwargs):
+    """
+    Reads a CSV file and returns a DataFrame with specified options.
+
+    Parameters:
+    csv_name (str): The path to the CSV file.
+    index_col (int, default=0): Column to use as the row index labels of the DataFrame.
+    parse_dates (bool, default=True): Boolean to parse dates.
+    **kwargs: Additional arguments passed to `pd.read_csv`.
+
+    Returns:
+    pd.DataFrame: DataFrame containing the data from the CSV file.
+
+    Notes:
+    - The function ensures that the index name is set to 'date' if the index column name is 'date', 'dates' or 'datatime', or if the index contains date-like values.
+    """
+
+    data = pd.read_csv(csv_name, index_col=index_col, parse_dates=parse_dates, **kwargs)
+    
+    # Print data if print_data is True
+    if print_data:
+        print("Columns:", ", ".join(data.columns))
+        print(data.head(3))
+        print('-' * 70)
+    
+    # Set index name to 'date' if appropriate
+    if data.index.name is not None:
+        if data.index.name.lower() in ['date', 'dates', 'datetime']:
+            data.index.name = 'date'
+    elif isinstance(data.index[0], (datetime.date, datetime.datetime)):
+        data.index.name = 'date'
+    
+    return data
+
+
+def time_series_to_df(returns: Union[pd.DataFrame, pd.Series, List[pd.Series]], name: str = "Returns"):
     """
     Converts returns to a DataFrame if it is a Series or a list of Series.
 
@@ -100,17 +136,29 @@ def fix_dates_index(returns: pd.DataFrame):
     """
     # Check if 'date' is in the columns and set it as the index
 
-    if 'date' in returns.columns.str.lower():
+    # Set index name to 'date' if appropriate
+    
+    if returns.index.name is not None:
+        if returns.index.name.lower() in ['date', 'dates', 'datetime']:
+            returns.index.name = 'date'
+    elif isinstance(returns.index[0], (datetime.date, datetime.datetime)):
+        returns.index.name = 'date'
+    elif 'date' in returns.columns.str.lower():
         returns = returns.rename({'Date': 'date'}, axis=1)
         returns = returns.set_index('date')
-    returns.index.name = 'date'
+    elif 'datetime' in returns.columns.str.lower():
+        returns = returns.rename({'Datetime': 'date'}, axis=1)
+        returns = returns.rename({'datetime': 'date'}, axis=1)
+        returns = returns.set_index('date')
 
-    # Convert dates to datetime
+    # Convert dates to datetime if not already in datetime format or if minutes are 0
     try:
-        returns.index = pd.to_datetime(returns.index.map(lambda x: x.date()))
+        returns.index = pd.to_datetime(returns.index, utc=True)
     except ValueError:
         print('Could not convert the index to datetime. Check the index format for invalid dates.')
-    
+    if not isinstance(returns.index, pd.DatetimeIndex) or (returns.index.minute == 0).all():
+        returns.index = pd.to_datetime(returns.index.map(lambda x: x.date()))
+        
     # Convert returns to float
     try:
         returns = returns.apply(lambda x: x.astype(float))
