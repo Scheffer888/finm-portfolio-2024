@@ -1,3 +1,5 @@
+# Description: This file contains functions for portfolio analysis and risk management.
+
 import pandas as pd
 import numpy as np
 from arch import arch_model
@@ -9,6 +11,7 @@ pd.set_option('display.max_columns', 30)
 from typing import Union, List, Callable
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import seaborn as sns
 
 import statsmodels.api as sm
@@ -17,40 +20,98 @@ from scipy.optimize import minimize
 import warnings
 warnings.filterwarnings("ignore")
 
-from scipy.stats import norm
+from scipy.stats import norm, kurtosis, skew
 
 import re
 
 from utils.tools import *
 
+PLOT_WIDTH, PLOT_HEIGHT = 12, 8
 
-def calc_cummulative_returns(
+def plot_cumulative_returns(
+    cumulative_returns: Union[pd.DataFrame, pd.Series],
+    name: str = None
+):
+    """
+    Plots cumulative returns from a time series of cumulative returns.
+
+    Parameters:
+    cumulative_returns (pd.DataFrame or pd.Series): Time series of cumulative returns.
+    name (str, default=None): Name for the title of the plot.
+
+    Returns:
+    None
+    """
+
+    # Handle index formatting for hours, minutes, and seconds
+    indexes_cum_ret = cumulative_returns.index
+    if indexes_cum_ret[0].hour == 0 and indexes_cum_ret[0].minute == 0 and indexes_cum_ret[0].second == 0:
+        formatted_index = indexes_cum_ret.strftime('%Y-%m-%d')
+    else:
+        formatted_index = indexes_cum_ret.strftime('%Y-%m-%d\n%H:%M:%S')
+
+    continuous_index = range(len(indexes_cum_ret))
+
+    # Plot cumulative returns
+    fig, ax = plt.subplots(figsize=(PLOT_WIDTH, PLOT_HEIGHT))
+    if isinstance(cumulative_returns, pd.Series):
+        ax.plot(continuous_index, cumulative_returns, label='Cumulative Returns', linewidth=1.5, color='blue')
+    elif isinstance(cumulative_returns, pd.DataFrame):
+        for column in cumulative_returns.columns:
+            ax.plot(continuous_index, cumulative_returns[column], label=column, linewidth=1.5)
+    else:
+        raise ValueError("`cumulative_returns` must be a pandas DataFrame or Series.")
+
+    # Format x-axis with formatted dates
+    num_ticks = 20
+    tick_indices = np.linspace(0, len(continuous_index) - 1, num=num_ticks, dtype=int)
+    tick_labels = [formatted_index[i] for i in tick_indices]
+    ax.set_xticks(tick_indices)
+    ax.set_xticklabels(tick_labels, rotation=45, fontsize=8)
+    ax.set_xlim([0, len(formatted_index) - 1])
+
+    # Add percentage formatting for y-axis
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1, decimals=2))
+
+    # Add zero line
+    ax.axhline(0, color='darkgrey', linewidth=1, linestyle='-')
+    ax.set_title(f'Cumulative Returns {name}' if name else 'Cumulative Returns', fontsize=14)
+
+    # Style grid and background
+    ax.grid(True, linestyle='--', linewidth=0.5)
+    ax.legend(fontsize=10)
+
+    # Show the plot
+    plt.show()
+
+
+
+def calc_cumulative_returns(
     returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
-    return_plot: bool = True,
-    fig_size: Union[int, float] = 7,
-    return_series: bool = False,
+    plot_returns: bool = True,
     name: str = None,
-    timeframes: Union[None, dict] = None,
+    return_series: bool = True,
+    timeframes: Union[None, dict] = None
 ):
     """
     Calculates cumulative returns from a time series of returns.
 
     Parameters:
     returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
-    return_plot (bool, default=True): If True, plots the cumulative returns.
-    fig_size (int or float, default = 7): Size of the plot for cumulative returns. Scale: 1.5
-    return_series (bool, default=False): If True, returns the cumulative returns as a DataFrame.
-    name (str, default=None): Name for the title of the plot or the cumulative return series.
+    plot_returns (bool, default=True): If True, plots the cumulative returns.
+    name (str, default=None): Name for the cumulative return series.
+    return_series (bool, default=True): If True, returns the cumulative returns as a Series.
     timeframes (dict or None, default=None): Dictionary of timeframes to calculate cumulative returns for each period.
-
+    
     Returns:
-    pd.DataFrame or None: Returns cumulative returns DataFrame if `return_series` is True.
+    pd.DataFrame: Returns cumulative returns DataFrame
     """
 
-    returns = time_series_to_df(returns) # Convert returns to DataFrame if it is a Series or a list of Series
-    fix_dates_index(returns) # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
+    returns = time_series_to_df(returns)  # Convert returns to DataFrame if it is a Series or a list of Series
+    fix_dates_index(returns)  # Fix the date index of the DataFrame if it is not in datetime format and convert returns to float
 
     if timeframes is not None:
+        results = {}
         for name, timeframe in timeframes.items():
             if timeframe[0] and timeframe[1]:
                 timeframe_returns = returns.loc[timeframe[0]:timeframe[1]]
@@ -60,36 +121,27 @@ def calc_cummulative_returns(
                 timeframe_returns = returns.loc[:timeframe[1]]
             else:
                 timeframe_returns = returns.copy()
+
             if len(timeframe_returns.index) == 0:
                 raise Exception(f'No returns data for {name} timeframe')
-            calc_cummulative_returns(
+
+            cumulative_returns = calc_cumulative_returns(
                 timeframe_returns,
-                return_plot=True,
-                fig_size=fig_size,
-                return_series=False,
+                return_series=True,
+                plot_returns=plot_returns,
                 name=name,
                 timeframes=None
             )
-        return
-   
-    returns = (1 + returns).cumprod()
-    returns = returns - 1
-    title = f'Cummulative Returns {name}' if name else 'Cummulative Returns'
-    if return_plot:
-        returns_perc = returns * 100
-        ax = returns_perc.plot(
-            title=title,
-            figsize=(fig_size*1.5, fig_size),
-            grid=True,
-            xlabel='Date',
-            ylabel='Cummulative Returns (%)'
-        )
+            results[name] = cumulative_returns
+        return results
 
-        # Set the background color to light grey
-        ax.set_facecolor("lightgrey")
+    cumulative_returns = (1 + returns).cumprod() - 1
 
-    if return_series == True or return_plot == False:
-        return returns
+    if plot_returns:
+        plot_cumulative_returns(cumulative_returns, name=name)
+
+    if return_series:
+        return cumulative_returns
     
 
 def calc_returns_statistics(
@@ -206,7 +258,6 @@ def calc_returns_statistics(
     summary_statistics['Annualized Mean'] = returns.mean() * annual_factor
     summary_statistics['Vol'] = returns.std()
     summary_statistics['Annualized Vol'] = returns.std() * np.sqrt(annual_factor)
-
     if provided_excess_returns is True:
         if rf_returns is not None:
             print('Excess returns and risk-free were both provided.'
@@ -214,11 +265,11 @@ def calc_returns_statistics(
         summary_statistics['Sharpe'] = returns.mean() / returns.std()
     else:
         try:
-            if rf is None:
+            if rf_returns is None:
                 print('No risk-free rate provided. Interpret "Sharpe" as "Mean/Volatility".\n')
                 summary_statistics['Sharpe'] = returns.mean() / returns.std()
             else:
-                excess_returns = returns.apply(lambda x: x - rf)
+                excess_returns = returns.apply(lambda x: x - rf_returns)
 
                 summary_statistics['Sharpe'] = excess_returns.mean() / returns.std()
         except Exception as e:
@@ -490,7 +541,7 @@ def calc_correlations(
         print(f'The lowest correlation ({lowest_corr["corr"]:.4f}) is between {lowest_corr.asset_1} and {lowest_corr.asset_2}')
 
     if show_heatmap == True:
-        fig, ax = plt.subplots(figsize=(matrix_size * 1.5, matrix_size))
+        fig, ax = plt.subplots(figsize=(PLOT_WIDTH, PLOT_HEIGHT))
         heatmap = sns.heatmap(
             correlation_matrix, 
             xticklabels=correlation_matrix.columns,
@@ -509,9 +560,19 @@ def calc_correlations(
 def calc_ewma_volatility(
         returns: pd.Series,
         theta : float = 0.94,
-        initial_vol : float = .2 / np.sqrt(252)
-    ) -> pd.Series:
-    var_t0 = initial_vol ** 2
+        ewma_initial_annual_vol : float = None,
+        annual_factor: int = None
+    ):
+
+    if ewma_initial_annual_vol is not None:
+        if annual_factor is None:
+            print('Assuming monthly returns with annualization term of 12')
+            annual_factor = 12
+        ewma_initial_annual_vol = ewma_initial_annual_vol / np.sqrt(annual_factor)
+    else:
+        ewma_initial_annual_vol = returns.std()
+    
+    var_t0 = ewma_initial_annual_vol ** 2
     ewma_var = [var_t0]
     for i in range(len(returns.index)):
         new_ewma_var = ewma_var[-1] * theta + (returns.iloc[i] ** 2) * (1 - theta)
@@ -542,9 +603,11 @@ def calc_var_cvar_summary(
     shift: int = 1,
     std_formula: bool = False,
     ewma_theta : float = .94,
-    ewma_initial_vol : float = .2 / np.sqrt(252),
+    ewma_initial_annual_vol: float = None,
+    include_garch: bool = False,
     garch_p: int = 1,
     garch_q: int = 1,
+    annual_factor: int = None,
     return_stats: Union[str, list] = ['Returns', 'VaR', 'CVaR', 'Vol'],
     keep_columns: Union[list, str] = None,
     drop_columns: Union[list, str] = None,
@@ -552,7 +615,7 @@ def calc_var_cvar_summary(
     drop_indexes: Union[list, str] = None
 ):
     """
-    Calculates a summary of VaR (Value at Risk) and CVaR (Conditional VaR) for the provided returns.
+    Calculates a summary of VaR (Value at Risk), CVaR (Conditional VaR), kurtosis, and skewness for the provided returns.
 
     Parameters:
     returns (pd.Series or pd.DataFrame): Time series of returns.
@@ -561,8 +624,14 @@ def calc_var_cvar_summary(
     return_hit_ratio (bool, default=False): If True, returns the hit ratio for the VaR.
     filter_first_hit_ratio_date (str, datetime.date or None, default=None): Date to filter the hit ratio calculation from then on.
     z_score (float, default=None): Z-score for parametric VaR calculation, in case no percentile is provided.
-    shift (int, default=1): Period shift for VaR/CVaR calculations.
+    shift (int, default=1): Period shift for VaR/CVaR calculations to avoid look-ahead bias.
     std_formula (bool, default=False): If True, uses the normal volatility formula with .std(). Else, use squared returns.
+    ewma_theta (float, default=0.94): Theta parameter for the EWMA volatility calculation.
+    ewma_initial_annual_vol (float, default=None): Initial annual volatility for the EWMA calculation.
+    include_garch (bool, default=False): If True, includes GARCH volatility in the summary.
+    garch_p (int, default=1): Order of the GARCH model.
+    garch_q (int, default=1): Order of the GARCH model.
+    annual_factor (int, default=None): Factor for annualizing returns.
     return_stats (str or list, default=['Returns', 'VaR', 'CVaR', 'Vol']): Statistics to return in the summary.
     keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
     drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
@@ -572,6 +641,9 @@ def calc_var_cvar_summary(
     Returns:
     pd.DataFrame: Summary of VaR and CVaR statistics.
     """
+    if annual_factor is None:
+        print('Assuming monthly returns with annualization term of 12')
+        annual_factor = 12
     if window is None:
         print('Using "window" of 60 periods, since none was specified')
         window = 60
@@ -589,6 +661,14 @@ def calc_var_cvar_summary(
     # Returns
     summary[f'Returns'] = returns
 
+    # Kurtosis
+    summary[f'Expanding Kurtosis'] = returns.expanding(window).apply(lambda x: kurtosis(x, fisher=True, bias=False))
+    summary[f'Rolling Kurtosis ({window})'] = returns.rolling(window).apply(lambda x: kurtosis(x, fisher=True, bias=False))
+
+    # Skewness
+    summary[f'Expanding Skewness'] = returns.expanding(window).apply(lambda x: skew(x, bias=False))
+    summary[f'Rolling Skewness ({window})'] = returns.rolling(window).apply(lambda x: skew(x, bias=False))
+
     # VaR
     summary[f'Expanding {window} Historical VaR ({percentile:.0%})'] = returns.expanding(min_periods=window).quantile(percentile)
     summary[f'Rolling {window} Historical VaR ({percentile:.0%})'] = returns.rolling(window=window).quantile(percentile)
@@ -598,15 +678,17 @@ def calc_var_cvar_summary(
     else: # Volaility assuming zero mean returns
         summary[f'Expanding {window} Volatility'] = np.sqrt((returns ** 2).expanding(window).mean())
         summary[f'Rolling {window} Volatility'] = np.sqrt((returns ** 2).rolling(window).mean())
-    summary[f'EWMA {ewma_theta:.2f} Volatility'] = calc_ewma_volatility(returns, theta=ewma_theta, initial_vol=ewma_initial_vol)
-    summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility'] = calc_garch_volatility(returns, p=garch_p, q=garch_q)
+    summary[f'EWMA {ewma_theta:.2f} Volatility'] = calc_ewma_volatility(returns, theta=ewma_theta, ewma_initial_annual_vol=ewma_initial_annual_vol, annual_factor=annual_factor)
+    if include_garch:
+        summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility'] = calc_garch_volatility(returns, p=garch_p, q=garch_q)
     
     # Parametric VaR assuming zero mean returns
     z_score = norm.ppf(percentile) if z_score is None else z_score
     summary[f'Expanding {window} Parametric VaR ({percentile:.0%})'] = summary[f'Expanding {window} Volatility'] * z_score
     summary[f'Rolling {window} Parametric VaR ({percentile:.0%})'] = summary[f'Rolling {window} Volatility'] * z_score
     summary[f'EWMA {ewma_theta:.2f} Parametric VaR ({percentile:.0%})'] = summary[f'EWMA {ewma_theta:.2f} Volatility'] * z_score
-    summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametric VaR ({percentile:.0%})'] = summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility'] * z_score
+    if include_garch:
+        summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametric VaR ({percentile:.0%})'] = summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility'] * z_score
 
     if return_hit_ratio:
         var_stats = [
@@ -614,9 +696,10 @@ def calc_var_cvar_summary(
             f'Rolling {window} Historical VaR ({percentile:.0%})',
             f'Expanding {window} Parametric VaR ({percentile:.0%})',
             f'Rolling {window} Parametric VaR ({percentile:.0%})',
-            f'EWMA {ewma_theta:.2f} Parametric VaR ({percentile:.0%})',
-            f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametric VaR ({percentile:.0%})'
+            f'EWMA {ewma_theta:.2f} Parametric VaR ({percentile:.0%})'
         ]
+        if include_garch:
+            var_stats.append(f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametric VaR ({percentile:.0%})')
         
         summary_hit_ratio = summary.copy()
         summary_hit_ratio[var_stats] = summary_hit_ratio[var_stats].shift()
@@ -648,7 +731,8 @@ def calc_var_cvar_summary(
     summary[f'Expanding {window} Parametrical CVaR ({percentile:.0%})'] = - norm.pdf(z_score) / percentile * summary[f'Expanding {window} Volatility']
     summary[f'Rolling {window} Parametrical CVaR ({percentile:.0%})'] = - norm.pdf(z_score) / percentile * summary[f'Rolling {window} Volatility']
     summary[f'EWMA {ewma_theta:.2f} Parametrical CVaR ({percentile:.0%})'] = - norm.pdf(z_score) / percentile * summary[f'EWMA {ewma_theta:.2f} Volatility']
-    summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametrical CVaR ({percentile:.0%})'] = - norm.pdf(z_score) / percentile * summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility']
+    if include_garch:
+        summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Parametrical CVaR ({percentile:.0%})'] = - norm.pdf(z_score) / percentile * summary[f'GARCH({garch_p:.0f}, {garch_q:.0f}) Volatility']
 
     if shift > 0:
         shift_columns = [c for c in summary.columns if not bool(re.search("returns", c))]
@@ -679,7 +763,7 @@ def plot_var(
         returns: Union[pd.DataFrame, pd.Series],
         var: Union[pd.DataFrame, pd.Series, List[pd.Series]],
         percentile: Union[None, float] = .05,
-        figsize: tuple = (15, 7),
+        figsize: tuple = (PLOT_WIDTH, PLOT_HEIGHT),
         limit = True,
         colors: Union[list, str] = ["blue", "red", "orange", "green", "purple", "black", "grey", "pink", "brown", "cyan", "magenta", "yellow"],
         var_name: str = None,
@@ -693,7 +777,7 @@ def plot_var(
     var (pd.DataFrame, pd.Series or List or pd.Series): Time series of VaR.
     percentile (float or None, default=.05): Percentile to calculate the hit ratio.
     limit (bool, default=True): If True, limits the y-axis to the minimum return.
-    figsize (tuple, default=(15, 7)): Size of the plot.
+    figsize (tuple, default=(PLOT_WIDTH, PLOT_HEIGHT)): Size of the plot.
     colors (list or str, default=["blue", "red", "orange", "green", "purple", "black", "grey", "pink", "brown", "cyan", "magenta", "yellow"]): Colors for the plot.
     var_name (str, default='VaR'): Name for the VaR column to be uses
     is_excess_returns (bool, default=False): If True, adjust y-axis label accordingly.

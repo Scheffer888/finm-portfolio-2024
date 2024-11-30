@@ -1,4 +1,8 @@
+# Title: Tools for Financial Data Analysis
+
 import datetime
+import yfinance as yf
+import numpy as np
 
 import pandas as pd
 pd.options.display.float_format = "{:,.4f}".format
@@ -10,7 +14,82 @@ from typing import Union, List, Dict
 import re
 
 
-def read_excel_default(excel_name: str, sheet_name: str = None, index_col : int = 0, parse_dates: bool =True, print_sheets: bool = False, **kwargs):
+def get_financial_data(output_file: str, stock: str, start_date: str, end_date: str, interval: str):
+    """
+    Loads financial data for a specified stock from Yahoo Finance.
+
+    Parameters:
+    stock (str): The stock ticker symbol.
+    start_date (str): The start date for the data (YYYY-MM-DD).
+    end_date (str): The end date for the data (YYYY-MM-DD).
+    interval (str): The interval for the data ("1m", "1h", "1d").
+    output_file (str): The name of the output file to save the data.
+
+    Returns:
+    pd.DataFrame: The financial data for the specified stock.
+    
+    """
+    try:
+        df = pd.read_csv(output_file)
+        print(f'File data found...reading {stock} data')
+    except FileNotFoundError:
+        print(f'File not found...downloading the {stock} data')
+        df = yf.download(stock, start=start_date, end=end_date, interval=interval)
+        df.to_csv(output_file)
+        df = pd.read_csv(output_file)
+    
+    return df
+
+
+def clean_yfinance_data(df: pd.DataFrame, keep_cols: Union[List, str] = None, drop_cols: Union[List, str] = None):
+    """
+    Cleans the data downloaded from Yahoo Finance.
+
+    Parameters:
+    df (pd.DataFrame): The data downloaded from Yahoo Finance.
+    keep_cols (list or str, default=None): Columns to keep in the DataFrame.
+    drop_cols (list or str, default=None): Columns to drop from the DataFrame.
+
+    Returns:
+    pd.DataFrame: The cleaned data.
+    """
+    df.columns = [col.lower() for col in df.columns]
+    df.set_index(df.columns[0], inplace=True)
+    if df.index.name is not None:
+        if df.index.name in ['date', 'dates', 'datetime']:
+            df.index.name = 'date'
+    elif isinstance(df.index[10], (datetime.date, datetime.datetime)):
+        df.index.name = 'date'
+    
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    df.dropna(inplace=True)
+    df.index = pd.to_datetime(df.index)
+    df.drop_duplicates(inplace=True)
+    df.sort_index(inplace=True)
+    # df = df.resample('1min').ffill()
+    
+    df['returns'] = df['adj close'].pct_change()
+
+    df['volume_delta'] = df['volume'].pct_change()
+    df['volume_delta'] = np.where(df['volume_delta'] == float('inf'), 1, df['volume_delta'])
+    if drop_cols:
+        df.drop(columns=drop_cols, inplace=True)
+    if keep_cols:
+        df = df[keep_cols]
+    
+    df.dropna(inplace=True)
+    
+    return df
+
+
+def read_excel_default(excel_name: str,
+                       sheet_name: str = None, 
+                       index_col : int = 0,
+                       parse_dates: bool =True,
+                       print_sheets: bool = False,
+                       **kwargs):
     """
     Reads an Excel file and returns a DataFrame with specified options.
 
@@ -46,16 +125,23 @@ def read_excel_default(excel_name: str, sheet_name: str = None, index_col : int 
             except:
                 return
     sheet_name = 0 if sheet_name is None else sheet_name
-    data = pd.read_excel(excel_name, index_col=index_col, parse_dates=parse_dates,  sheet_name=sheet_name, **kwargs)
-    if data.index.name is not None:
-        if data.index.name.lower() in ['date', 'dates', 'datetime']:
-            data.index.name = 'date'
-    elif isinstance(data.index[0], (datetime.date, datetime.datetime)):
-        data.index.name = 'date'
-    return data
+    df = pd.read_excel(excel_name, index_col=index_col, parse_dates=parse_dates,  sheet_name=sheet_name, **kwargs)
+    df.columns = [col.lower() for col in df.columns]
+    if df.index.name is not None:
+        if df.index.name in ['date', 'dates', 'datetime']:
+            df.index.name = 'date'
+    elif isinstance(df.index[0], (datetime.date, datetime.datetime)):
+        df.index.name = 'date'
+    return df
 
 
-def read_csv_default(csv_name: str, index_col: int = 0, parse_dates: bool = True, print_data: bool = False, **kwargs):
+def read_csv_default(csv_name: str,
+                     index_col: int = 0,
+                     parse_dates: bool = True,
+                     print_data: bool = False,
+                     keep_cols: Union[List, str] = None,
+                     drop_cols: Union[List, str] = None,
+                     **kwargs):
     """
     Reads a CSV file and returns a DataFrame with specified options.
 
@@ -63,6 +149,9 @@ def read_csv_default(csv_name: str, index_col: int = 0, parse_dates: bool = True
     csv_name (str): The path to the CSV file.
     index_col (int, default=0): Column to use as the row index labels of the DataFrame.
     parse_dates (bool, default=True): Boolean to parse dates.
+    print_data (bool, default=False): If True, prints the first few rows of the DataFrame.
+    keep_cols (list or str, default=None): Columns to read from the CSV file.
+    drop_cols (list or str, default=None): Columns to drop from the DataFrame.
     **kwargs: Additional arguments passed to `pd.read_csv`.
 
     Returns:
@@ -72,22 +161,101 @@ def read_csv_default(csv_name: str, index_col: int = 0, parse_dates: bool = True
     - The function ensures that the index name is set to 'date' if the index column name is 'date', 'dates' or 'datatime', or if the index contains date-like values.
     """
 
-    data = pd.read_csv(csv_name, index_col=index_col, parse_dates=parse_dates, **kwargs)
-    
+    df = pd.read_csv(csv_name, index_col=index_col, parse_dates=parse_dates, **kwargs)
+    df.columns = [col.lower() for col in df.columns]
+
+    # Filter columns if keep_cols is specified
+    if keep_cols is not None:
+        if isinstance(keep_cols, str):
+            keep_cols = [keep_cols]
+        df = df[keep_cols]
+
+    # Drop columns if drop_cols is specified
+    if drop_cols is not None:
+        if isinstance(drop_cols, str):
+            drop_cols = [drop_cols]
+        df = df.drop(columns=drop_cols, errors='ignore')
+
     # Print data if print_data is True
     if print_data:
-        print("Columns:", ", ".join(data.columns))
-        print(data.head(3))
+        print("Columns:", ", ".join(df.columns))
+        print(df.head(3))
         print('-' * 70)
     
     # Set index name to 'date' if appropriate
-    if data.index.name is not None:
-        if data.index.name.lower() in ['date', 'dates', 'datetime']:
-            data.index.name = 'date'
-    elif isinstance(data.index[0], (datetime.date, datetime.datetime)):
-        data.index.name = 'date'
+    if df.index.name is not None:
+        if df.index.name in ['date', 'dates', 'datetime']:
+            df.index.name = 'date'
+    elif isinstance(df.index[0], (datetime.date, datetime.datetime)):
+        df.index.name = 'date'
     
-    return data
+    return df
+
+
+def read_pickle_default(pkl_name: str,
+                        index_col: int = 0,
+                        parse_dates: bool = True,
+                        print_data: bool = False,
+                        keep_cols: Union[List, str] = None,
+                        drop_cols: Union[List, str] = None,
+                        **kwargs):
+    """
+    Reads a Pickle file and returns a DataFrame with specified options.
+
+    Parameters:
+    pkl_name (str): The path to the Pickle file.
+    index_col (int, default=0): Column to use as the row index labels of the DataFrame.
+    parse_dates (bool, default=True): Boolean to parse dates.
+    print_data (bool, default=False): If True, prints the first few rows of the DataFrame.
+    keep_cols (list or str, default=None): Columns to read from the Pickle file.
+    drop_cols (list or str, default=None): Columns to drop from the DataFrame.
+    **kwargs: Additional arguments passed to `pd.read_pickle`.
+
+    Returns:
+    pd.DataFrame: DataFrame containing the data from the CSV file.
+
+    Notes:
+    - The function ensures that the index name is set to 'date' if the index column name is 'date', 'dates' or 'datatime', or if the index contains date-like values.
+    """
+
+    # Load the Pickle file
+    df = pd.read_pickle(pkl_name, **kwargs)
+    df.columns = [col.lower() for col in df.columns]
+
+    if index_col is not None:
+        df = df.set_index(df.columns[index_col])
+
+    if parse_dates:
+        try:
+            df.index = pd.to_datetime(df.index, errors='ignore')
+        except Exception as e:
+            print(f"Warning: Failed to parse dates in index. Error: {e}")
+
+    # Filter columns if keep_cols is specified
+    if keep_cols is not None:
+        if isinstance(keep_cols, str):
+            keep_cols = [keep_cols]
+        df = df[keep_cols]
+
+    # Drop columns if drop_cols is specified
+    if drop_cols is not None:
+        if isinstance(drop_cols, str):
+            drop_cols = [drop_cols]
+        df = df.drop(columns=drop_cols, errors='ignore')
+
+    # Print data if print_data is True
+    if print_data:
+        print("Columns:", ", ".join(df.columns))
+        print(df.head(3))
+        print('-' * 70)
+
+    if df.index.name is not None:
+        if df.index.name in ['date', 'dates', 'datetime']:
+            df.index.name = 'date'
+    elif isinstance(df.index[0], (datetime.date, datetime.datetime)):
+        df.index.name = 'date'
+
+    return df
 
 
 def time_series_to_df(returns: Union[pd.DataFrame, pd.Series, List[pd.Series]], name: str = "Returns"):
