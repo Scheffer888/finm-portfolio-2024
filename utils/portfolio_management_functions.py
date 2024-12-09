@@ -5,7 +5,7 @@ import numpy as np
 from arch import arch_model
 import math
 import datetime
-pd.options.display.float_format = "{:,.4f}".format
+#pd.options.display.float_format = "{:,.4f}".format
 pd.set_option('display.width', 200)
 pd.set_option('display.max_columns', 30)
 from typing import Union, List, Callable
@@ -206,8 +206,8 @@ def calc_returns_statistics(
     if keep_columns is None:
         keep_columns = ['Accumulated Return', 'Annualized Mean', 'Annualized Vol', 'Annualized Sharpe', 'Min', 'Mean', 'Max', 'Correlation']
         if tail_risks == True:
-            keep_columns += ['Skewness', 'Excess Kurtosis', f'Historical VaR ({var_quantile})', f'Annualized Historical VaR ({var_quantile})', 
-                                f'Historical CVaR ({var_quantile})', f'Annualized Historical CVaR ({var_quantile})', 'Max Drawdown', 
+            keep_columns += ['Skewness', 'Excess Kurtosis', f'Historical VaR', f'Annualized Historical VaR', 
+                                f'Historical CVaR', f'Annualized Historical CVaR', 'Max Drawdown', 
                                 'Peak Date', 'Bottom Date', 'Recovery', 'Duration (days)']
     if return_tangency_weights == True:
         keep_columns += ['Tangency Portfolio']
@@ -269,8 +269,7 @@ def calc_returns_statistics(
                 print('No risk-free rate provided. Interpret "Sharpe" as "Mean/Volatility".\n')
                 summary_statistics['Sharpe'] = returns.mean() / returns.std()
             else:
-                excess_returns = returns.apply(lambda x: x - rf_returns)
-
+                excess_returns = returns.subtract(rf_returns.iloc[:, 0], axis=0)
                 summary_statistics['Sharpe'] = excess_returns.mean() / returns.std()
         except Exception as e:
             print(f'Could not calculate Sharpe: {e}')
@@ -1605,12 +1604,16 @@ def calc_regression(
                 regression_statistics.loc[y_asset, 'Annualized Tracking Error'] = regression_statistics.loc[y_asset, 'Tracking Error'] * (annual_factor ** 0.5) # Annualized Residuals Volatility
 
             if treynor_ratio == True:
-                try:
-                    treynor_ratio = y.mean() / regression_statistics.loc[y_asset, f'Beta ({market_name})']
-                    regression_statistics.loc[y_asset, 'Treynor Ratio'] = treynor_ratio # Treynor Ratio
-                    regression_statistics.loc[y_asset, 'Annualized Treynor Ratio'] = treynor_ratio * annual_factor # Annualized Treynor Ratio
-                except:
-                    print(f'{market_name} is not a factor in the regression. Treynor Ratio cannot be calculated.')
+                market_names = ['SPY', 'SPX', 'SP500', 'SPY US Equity']
+                if market_name not in market_names:
+                    print(f'Neither {market_name} are a factor in the regression. Treynor Ratio cannot be calculated.')
+                else:
+                    market_name = [m for m in market_names if m in X.columns][0]
+                    try:
+                        regression_statistics.loc[y_asset, 'Treynor Ratio'] = y.mean() / regression_statistics.loc[y_asset, f'Beta ({market_name})'] # Treynor Ratio
+                        regression_statistics.loc[y_asset, 'Annualized Treynor Ratio'] = regression_statistics.loc[y_asset, 'Treynor Ratio'] * annual_factor # Annualized Treynor Ratio
+                    except:
+                        print(f'Treynor Ratio could not be calculated.')
             if information_ratio == True:
                 if intercept:
                     regression_statistics.loc[y_asset, 'Information Ratio'] = regression_statistics.loc[y_asset, 'Alpha'] / residuals.std() # Information Ratio
@@ -2070,7 +2073,7 @@ def calc_replication_oos_perf(
 
     X = X.shift(lag_periods) # Lag the predictors
 
-    y_name = Y.columns[0]
+    y_name = y.columns[0]
     X_names = " + ".join(list(X.columns))
     X_names = "Intercept + " + X_names if intercept else X_names
 
@@ -2079,11 +2082,11 @@ def calc_replication_oos_perf(
         X = sm.add_constant(X)
  
     # Check if y and X have the same length
-    if len(X.index) != len(Y.index):
-        print(f'y has lenght {len(Y.index)} and X has lenght {len(X.index)}. Joining y and X by y.index...')
-        df = Y.join(X, how='left')
+    if len(X.index) != len(y.index):
+        print(f'y has lenght {len(y.index)} and X has lenght {len(X.index)}. Joining y and X by y.index...')
+        df = y.join(X, how='left')
         df = df.dropna()
-        Y = df[y_name]
+        y = df[y_name]
         X = df.drop(columns=y_name)
         if len(X.index) < len(X.columns) + 1:
             raise Exception('Indexes of y and X do not match and there are less observations than degrees of freedom. Cannot calculate regression')
