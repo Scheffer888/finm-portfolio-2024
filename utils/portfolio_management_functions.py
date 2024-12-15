@@ -487,7 +487,6 @@ def get_best_and_worst(
 def calc_correlations(
     returns: Union[pd.DataFrame, pd.Series, List[pd.Series]],
     print_highest_lowest: bool = True,
-    matrix_size: Union[int, float] = 7,
     show_heatmap: bool = True,
     return_matrix: bool = False,
     keep_columns: Union[list, str] = None,
@@ -501,7 +500,6 @@ def calc_correlations(
     Parameters:
     returns (pd.DataFrame, pd.Series or List or pd.Series): Time series of returns.
     print_highest_lowest (bool, default=True): If True, prints the highest and lowest correlations.
-    matrix_size (int or float, default=7): Size of the heatmap for correlation matrix visualization.
     show_heatmap (bool, default=False): If True, returns a heatmap of the correlation matrix.
     keep_columns (list or str, default=None): Columns to keep in the resulting DataFrame.
     drop_columns (list or str, default=None): Columns to drop from the resulting DataFrame.
@@ -1009,7 +1007,7 @@ def calc_equal_weights_port(
         if annual_factor is None:
             print(f'Assuming monthly returns with annualization term of 12 since none was provided')
             annual_factor = 12
-        scaler = target_return / (port_returns[f'{name}'].mean() * annual_factor)
+        scaler = target_return / (port_returns[f'{name} Portfolio'].mean() * annual_factor)
         equal_wts[[f'{name} Portfolio']] *= scaler
         port_returns *= scaler
         

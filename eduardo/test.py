@@ -1,21 +1,21 @@
 # Import Libraries:
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import re
-import datetime
-from typing import Union, List, Callable
+#import matplotlib.pyplot as plt
+#import seaborn as sns
+#import re
+#import datetime
+#from typing import Union, List, Callable
 
-import warnings
-warnings.filterwarnings("ignore")
+#import warnings
+#warnings.filterwarnings("ignore")
 
-pd.options.display.float_format = "{:,.4f}".format
-pd.set_option('display.width', 200)
-pd.set_option('display.max_columns', 30)
+#pd.options.display.float_format = "{:,.4f}".format
+#pd.set_option('display.width', 200)
+#pd.set_option('display.max_columns', 30)
 
-import statsmodels.api as sm
-from scipy.stats import t
+#import statsmodels.api as sm
+#from scipy.stats import t
 
 import os
 import sys
@@ -24,7 +24,7 @@ import sys
 parent_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Get parent path (if using .py file)
 os.chdir(parent_path) # Set parent path as working directory (for reading and writing files)
 sys.path.insert(0, parent_path) # Add parent path to system path (for importing modules)
-
+'''
 import utils.portfolio_management_functions as pm
 
 # Check data in the file (sheets, columns, data):
@@ -55,3 +55,13 @@ summary_stats = pm.calc_returns_statistics(returns=total_returns,
                                            keep_columns=['Annualized Mean', 'Annualized Vol', 'Annualized Sharpe']
                                            )
 print(summary_stats)
+'''
+
+file_path = 'homework/Homework 7.pdf'
+from docling.document_converter import DocumentConverter
+
+source = file_path  # PDF path or URL
+converter = DocumentConverter()
+result = converter.convert(source)
+with open("output.md", "w", encoding="utf-8") as f:
+    f.write(result.document.export_to_markdown())
