@@ -3,6 +3,7 @@
 import datetime
 import yfinance as yf
 import numpy as np
+import holidays
 
 import pandas as pd
 pd.options.display.float_format = "{:,.4f}".format
@@ -12,6 +13,47 @@ pd.set_option('display.max_columns', 30)
 from typing import Union, List, Dict
 
 import re
+
+
+from pandas.tseries.holiday import USFederalHolidayCalendar
+from pandas.tseries.offsets import CustomBusinessDay
+
+
+def bday(date):
+    us_bus = CustomBusinessDay(calendar=USFederalHolidayCalendar())
+    return bool(len(pd.bdate_range(date, date,freq=us_bus)))
+
+def prev_bday(date: Union[str, datetime.date], force_prev: bool = False) -> Union[str, datetime.date]:
+
+    if isinstance(date,str):
+        date = datetime.datetime.strptime(date,'%Y-%m-%d')
+        date2str = True
+    else:
+        date2str = False
+        
+    if force_prev:
+        date += -datetime.timedelta(days=1)
+    while not bday(date):
+        date += -datetime.timedelta(days=1)
+    
+    if date2str:
+        date = date.strftime('%Y-%m-%d')
+        
+    return date
+
+
+from datetime import timedelta
+
+
+def next_business_day(date: datetime.date):
+    
+    ONE_DAY = timedelta(days=1)
+    HOLIDAYS_US = holidays.US()
+
+    next_day = date
+    while next_day.weekday() in holidays.WEEKEND or next_day in HOLIDAYS_US:
+        next_day += ONE_DAY
+    return next_day
 
 
 def get_financial_data(output_file: str, stock: str, start_date: str, end_date: str, interval: str):
